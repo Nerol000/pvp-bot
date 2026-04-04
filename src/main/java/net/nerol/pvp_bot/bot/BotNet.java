@@ -89,7 +89,7 @@ public final class BotNet {
 
         // If we get here, your Connection truly has no setter-like method exposed.
         // That's still OK in many cases because we swallow send(), but placeNewPlayer
-        // might expect it. We'll fail loudly so you see it early.
+        // might expect it.
         throw new IllegalStateException(
                 "Could not find any method to attach PacketListener to Connection in this Minecraft version. " +
                         "Paste Connection methods containing 'listener' and I'll wire it precisely."
