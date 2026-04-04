@@ -1,0 +1,38 @@
+{
+	"schemaVersion": 1,
+	"id": "pvp_bot",
+	"version": "${version}",
+	"name": "PvP Bot",
+	"description": "PvP Bot!",
+	"authors": [
+		"Nerol"
+	],
+	"contact": {
+		"homepage": "https://fabricmc.net/",
+		"sources": "https://github.com/FabricMC/fabric-example-mod"
+	},
+	"license": "MIT",
+	"icon": "assets/pvp_bot/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"net.nerol.pvp_bot.PvPBot"
+		],
+		"client": [
+			"net.nerol.pvp_bot.PvPBotClient"
+		]
+	},
+	"mixins": [
+		"pvp_bot.mixins.json",
+		{
+			"config": "pvp_bot.client.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.18.5",
+		"minecraft": "~26.1",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}
