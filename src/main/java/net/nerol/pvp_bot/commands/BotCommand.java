@@ -15,9 +15,8 @@ import net.nerol.pvp_bot.bot.BotSpawner;
 public final class BotCommand {
 
     public static void register() {
-        CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
-            registerTree(dispatcher);
-        });
+        CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
+                registerTree(dispatcher));
     }
 
     public static void registerTree(CommandDispatcher<CommandSourceStack> d) {

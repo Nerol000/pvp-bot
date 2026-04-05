@@ -20,7 +20,6 @@ public final class BotSpawner {
         UUID uuid = UUID.nameUUIDFromBytes(("OfflinePlayer:" + name).getBytes(StandardCharsets.UTF_8));
         GameProfile profile = new GameProfile(uuid, name);
 
-
         CommonListenerCookie cookie = CommonListenerCookie.createInitial(profile, false);
         ClientInformation info = cookie.clientInformation();
 
@@ -30,7 +29,7 @@ public final class BotSpawner {
         bot.setXRot(pitch);
 
         // Minimal connection + listener (cookie-aware)
-        BotNet.SilentConnection conn = new BotNet.SilentConnection(PacketFlow.CLIENTBOUND);
+        BotNet.SilentConnection conn = new BotNet.SilentConnection(PacketFlow.SERVERBOUND);
         BotNet.SilentGameListener listener = new BotNet.SilentGameListener(server, conn, bot, cookie);
 
         bot.connection = listener; // important: many server paths assume non-null
