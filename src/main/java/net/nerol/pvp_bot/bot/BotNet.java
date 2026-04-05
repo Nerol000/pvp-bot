@@ -1,10 +1,10 @@
 package net.nerol.pvp_bot.bot;
 
-import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.embedded.EmbeddedChannel;
 
 import net.minecraft.network.Connection;
 import net.minecraft.network.PacketListener;
+import net.minecraft.network.PacketSendListener;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.PacketFlow;
 
@@ -12,9 +12,6 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.CommonListenerCookie;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
-import net.nerol.pvp_bot.PvPBot;
-import org.jetbrains.annotations.NotNull;
-import org.jspecify.annotations.Nullable;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -52,9 +49,6 @@ public final class BotNet {
                 }
                 cls = cls.getSuperclass();
             }
-
-            PvPBot.LOGGER.info("injected fake chanel...");
-
         }
 
         @Override
@@ -97,11 +91,10 @@ public final class BotNet {
                 Method m = conn.getClass().getMethod(n, PacketListener.class);
                 m.invoke(conn, listener);
                 return;
-            } catch (ReflectiveOperationException e) {
-                PvPBot.LOGGER.info(String.valueOf(e));
+            } catch (ReflectiveOperationException ignored) {
+                // Method exists but failed to invoke (e.g. wrong protocol state) — try next
             }
         }
-
 
         // Brute-force: single-arg method accepting a PacketListener subtype
         for (Method m : conn.getClass().getMethods()) {
@@ -110,9 +103,7 @@ public final class BotNet {
                 try {
                     m.invoke(conn, listener);
                     return;
-                } catch (ReflectiveOperationException ignored) {
-                    PvPBot.LOGGER.info("Issue with p");
-                }
+                } catch (ReflectiveOperationException ignored) {}
             }
         }
 
