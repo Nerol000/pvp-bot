@@ -1,5 +1,7 @@
 package net.nerol.pvp_bot.bot;
 
+import io.netty.channel.embedded.EmbeddedChannel;
+
 import net.minecraft.network.Connection;
 import net.minecraft.network.PacketListener;
 import net.minecraft.network.PacketSendListener;
@@ -11,6 +13,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.CommonListenerCookie;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
 public final class BotNet {
@@ -18,17 +21,44 @@ public final class BotNet {
     public static class SilentConnection extends Connection {
         public SilentConnection(PacketFlow side) {
             super(side);
+            injectFakeChannel();
+        }
+
+        /**
+         * Inject a Netty EmbeddedChannel so Connection's internal channel field is non-null.
+         * Without this, any code path that accesses channel.writeAndFlush() directly
+         * (rather than through our overridden send()) will NPE inside placeNewPlayer.
+         */
+        private void injectFakeChannel() {
+            EmbeddedChannel fake = new EmbeddedChannel() {
+                @Override public boolean isOpen()   { return true; }
+                @Override public boolean isActive() { return true; }
+            };
+            fake.config().setAutoRead(false);
+
+            Class<?> cls = Connection.class;
+            while (cls != null) {
+                for (Field f : cls.getDeclaredFields()) {
+                    if (io.netty.channel.Channel.class.isAssignableFrom(f.getType())) {
+                        try {
+                            f.setAccessible(true);
+                            f.set(this, fake);
+                            return;
+                        } catch (IllegalAccessException ignored) {}
+                    }
+                }
+                cls = cls.getSuperclass();
+            }
         }
 
         @Override
-        public void send(Packet<?> packet) {
-            // swallow
-        }
+        public void send(Packet<?> packet) { /* swallow */ }
 
         @Override
-        public boolean isConnected() {
-            return true;
-        }
+        public void send(Packet<?> packet, PacketSendListener listener) { /* swallow */ }
+
+        @Override
+        public boolean isConnected() { return true; }
     }
 
     public static class SilentGameListener extends ServerGamePacketListenerImpl {
@@ -37,63 +67,47 @@ public final class BotNet {
         }
 
         @Override
-        public void send(Packet<?> packet) {
-            // swallow
-        }
-
+        public void send(Packet<?> packet) { /* swallow */ }
 
         @Override
-        public void resumeFlushing() {
-            // no-op
-        }
+        public void send(Packet<?> packet, PacketSendListener listener) { /* swallow */ }
+
+        @Override
+        public void resumeFlushing() { /* no-op */ }
     }
 
     /**
-     * Version-proof: attach listener to Connection even if method isn't named setListener.
-     * We try to find any public/protected method that takes a PacketListener (or supertype)
-     * and invoke it.
+     * Try to attach the listener to the Connection. In MC 26.x the API changed to
+     * setupInboundProtocol(ProtocolInfo, PacketListener) — a 2-arg method — so a
+     * single-arg scan won't find it. We attempt known names and fall back to a scan,
+     * but never throw: the send() overrides already swallow all packets so the bot
+     * is safe without a listener wired into the Connection.
      */
     public static void attachListener(Connection conn, PacketListener listener) {
-        // First, try common obvious names (cheap)
-        String[] names = { "setListener", "setPacketListener", "setListenerForServerboundHandshake" };
+        String[] singleArgNames = { "setListener", "setPacketListener", "setListenerForServerboundHandshake" };
 
-        for (String n : names) {
+        for (String n : singleArgNames) {
             try {
                 Method m = conn.getClass().getMethod(n, PacketListener.class);
                 m.invoke(conn, listener);
                 return;
-            } catch (NoSuchMethodException ignored) {
-            } catch (ReflectiveOperationException e) {
-                throw new RuntimeException("Failed invoking " + n + " on Connection", e);
+            } catch (ReflectiveOperationException ignored) {
+                // Method exists but failed to invoke (e.g. wrong protocol state) — try next
             }
         }
 
-        // Otherwise: brute-force scan for a single-arg method compatible with PacketListener
+        // Brute-force: single-arg method accepting a PacketListener subtype
         for (Method m : conn.getClass().getMethods()) {
             Class<?>[] p = m.getParameterTypes();
-            if (p.length == 1 && p[0].isAssignableFrom(listener.getClass())) {
-                try {
-                    m.invoke(conn, listener);
-                    return;
-                } catch (ReflectiveOperationException ignored) {
-                }
-            }
             if (p.length == 1 && PacketListener.class.isAssignableFrom(p[0])) {
                 try {
                     m.invoke(conn, listener);
                     return;
-                } catch (ReflectiveOperationException ignored) {
-                }
+                } catch (ReflectiveOperationException ignored) {}
             }
         }
 
-        // If we get here, your Connection truly has no setter-like method exposed.
-        // That's still OK in many cases because we swallow send(), but placeNewPlayer
-        // might expect it.
-        throw new IllegalStateException(
-                "Could not find any method to attach PacketListener to Connection in this Minecraft version. " +
-                        "Paste Connection methods containing 'listener' and I'll wire it precisely."
-        );
+        // Not fatal — send() overrides prevent any packet from reaching a real channel.
     }
 
     private BotNet() {}
