@@ -3,16 +3,28 @@ package net.nerol.pvp_bot.commands;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.FloatArgumentType;
 
+import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.coordinates.Vec3Argument;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.phys.Vec3;
+import net.nerol.pvp_bot.PvPBot;
+import net.nerol.pvp_bot.bot.BotPlayer;
 import net.nerol.pvp_bot.bot.BotSpawner;
 
+import java.awt.*;
+import java.util.HashSet;
+import java.util.Set;
+
 public final class BotCommand {
+    private static final String name = "PracticeBot";
 
     public static void register() {
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
@@ -21,6 +33,18 @@ public final class BotCommand {
 
     public static void registerTree(CommandDispatcher<CommandSourceStack> d) {
         d.register(Commands.literal("pvpbot").requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+            .then(Commands.literal("kill"))
+                .executes(ctx -> {
+                    var src = ctx.getSource();
+                    return kill(src);
+                })
+                .then(Commands.argument("botname", StringArgumentType.word()))
+                        .executes(ctx -> {
+                            var src = ctx.getSource();
+                            return kill(src, StringArgumentType.getString(ctx, "botname"));
+                        })
+
+
             .then(Commands.literal("spawn")
                 .executes(ctx -> {
                     var src = ctx.getSource();
@@ -85,15 +109,65 @@ public final class BotCommand {
     private static int spawn(CommandSourceStack src, Vec3 pos, float yaw, float pitch) {
         ServerLevel level = src.getLevel();
 
-        String botName = "PracticeBot";
-
-        BotSpawner.spawn(src.getServer(), level, pos, yaw, pitch, botName);
-
-        src.sendSuccess(() -> net.minecraft.network.chat.Component.literal(
-                "Spawned " + botName + " at " + pos + " facing yaw=" + yaw + " pitch=" + pitch
-        ), true);
+        BotSpawner.spawn(src.getServer(), level, pos, yaw, pitch, getNextBotName(src.getServer(), name));
 
         return 1;
+    }
+
+    private static int kill(CommandSourceStack src, String name) throws CommandSyntaxException {
+        for (ServerPlayer bot : (src.getServer()).getPlayerList().getPlayers()) {
+            if (bot instanceof BotPlayer && bot.getPlainTextName().equalsIgnoreCase(name)) {
+                ((BotPlayer) bot).kill(Component.literal("Killed"));
+                return 1;
+            }
+        }
+
+        throw new CommandSyntaxException(null, Component.literal("Invalid command syntax!"));
+    }
+
+    private static int kill(CommandSourceStack src) {
+        for (ServerPlayer bot : (src.getServer()).getPlayerList().getPlayers()) {
+            if (bot instanceof BotPlayer) {
+                ((BotPlayer) bot).kill(Component.literal("Killed"));
+            }
+        }
+        return 1;
+    }
+
+    public static String getNextBotName(MinecraftServer server, String base) {
+        Set<Integer> used = new HashSet<>();
+
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            String name = player.getGameProfile().name();
+
+
+            if (name.equals(base)) {
+                used.add(0);
+                continue;
+            }
+
+            if (name.startsWith(base)) {
+                String suffix = name.substring(base.length());
+
+                if (!suffix.isEmpty() && suffix.chars().allMatch(Character::isDigit)) {
+                    int num = Integer.parseInt(suffix);
+                    used.add(num);
+                }
+            }
+        }
+
+        for (Integer i : used) {
+            PvPBot.LOGGER.info(String.valueOf(i));
+        }
+
+        // Find smallest missing index
+
+        int i = 0;
+        while (used.contains(i)) {
+            i++;
+        }
+
+        return (i == 0) ? base : base + i;
     }
 
     private BotCommand() {}

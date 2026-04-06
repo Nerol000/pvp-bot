@@ -13,7 +13,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
 public final class BotSpawner {
-    private static int botNums = 0;
 
     public static BotPlayer spawn(MinecraftServer server, ServerLevel level, Vec3 pos, float yaw, float pitch, String name) {
         // Offline-style deterministic UUID so re-spawns are stable (optional)
@@ -37,11 +36,6 @@ public final class BotSpawner {
 
         PlayerList playerList = server.getPlayerList();
         playerList.placeNewPlayer(conn, bot, cookie);
-
-        bot.setCustomName(net.minecraft.network.chat.Component.literal("@PvPBot"));
-        bot.setCustomNameVisible(true);
-
-        botNums++;
 
         return bot;
     }
