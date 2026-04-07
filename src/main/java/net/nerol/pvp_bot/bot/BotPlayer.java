@@ -1,15 +1,14 @@
 package net.nerol.pvp_bot.bot;
 
 import com.mojang.authlib.GameProfile;
-
 import net.minecraft.network.DisconnectionDetails;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.network.protocol.game.ServerboundClientCommandPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.TickTask;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ClientInformation;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.ProblemReporter;
 import net.minecraft.world.damagesource.DamageSource;
@@ -32,7 +31,7 @@ public class BotPlayer extends ServerPlayer {
         this.setGameMode(GameType.SURVIVAL);
     }
 
-    private static void loadPlayerData(BotPlayer player) {
+    public static void loadPlayerData(BotPlayer player) {
         player.level().getServer().getPlayerList()
                 .loadPlayerData(player.nameAndId())
                 .map(tag -> TagValueInput.create(
@@ -60,6 +59,13 @@ public class BotPlayer extends ServerPlayer {
             double startZ = this.getZ();
 
             super.tick();
+
+            this.doCheckFallDamage(
+                    this.getDeltaMovement().x,
+                    this.getDeltaMovement().y,
+                    this.getDeltaMovement().z,
+                    this.onGround()
+            );
 
             this.doTick();
 

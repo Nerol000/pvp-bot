@@ -2,11 +2,8 @@ package net.nerol.pvp_bot.commands;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.FloatArgumentType;
-
 import com.mojang.brigadier.arguments.StringArgumentType;
-import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
-
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.coordinates.Vec3Argument;
@@ -19,7 +16,6 @@ import net.nerol.pvp_bot.PvPBot;
 import net.nerol.pvp_bot.bot.BotPlayer;
 import net.nerol.pvp_bot.bot.BotSpawner;
 
-import java.awt.*;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -33,17 +29,28 @@ public final class BotCommand {
 
     public static void registerTree(CommandDispatcher<CommandSourceStack> d) {
         d.register(Commands.literal("pvpbot").requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
-            .then(Commands.literal("kill"))
-                .executes(ctx -> {
-                    var src = ctx.getSource();
-                    return kill(src);
-                })
-                .then(Commands.argument("botname", StringArgumentType.word()))
-                        .executes(ctx -> {
-                            var src = ctx.getSource();
-                            return kill(src, StringArgumentType.getString(ctx, "botname"));
-                        })
+            .then(
+                Commands.literal("kill")
+                    .executes(ctx -> kill(ctx.getSource()))
+                        .then(
+                            Commands.argument("botname", StringArgumentType.word())
+                                .suggests((ctx, builder) -> {
+                                    var players = ctx.getSource().getServer().getPlayerList().getPlayers();
 
+                                    for (ServerPlayer player : players) {
+                                        if (player instanceof BotPlayer bot) {
+                                            builder.suggest(bot.getName().getString());
+                                        }
+                                    }
+
+                                    return builder.buildFuture();
+                                })
+                                .executes(ctx ->
+                                    kill(ctx.getSource(),
+                                            StringArgumentType.getString(ctx, "botname"))
+                                )
+                        )
+            )
 
             .then(Commands.literal("spawn")
                 .executes(ctx -> {
@@ -114,15 +121,14 @@ public final class BotCommand {
         return 1;
     }
 
-    private static int kill(CommandSourceStack src, String name) throws CommandSyntaxException {
+    private static int kill(CommandSourceStack src, String name) {
         for (ServerPlayer bot : (src.getServer()).getPlayerList().getPlayers()) {
             if (bot instanceof BotPlayer && bot.getPlainTextName().equalsIgnoreCase(name)) {
                 ((BotPlayer) bot).kill(Component.literal("Killed"));
                 return 1;
             }
         }
-
-        throw new CommandSyntaxException(null, Component.literal("Invalid command syntax!"));
+        return 0;
     }
 
     private static int kill(CommandSourceStack src) {
