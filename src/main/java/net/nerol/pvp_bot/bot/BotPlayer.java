@@ -10,7 +10,6 @@ import net.minecraft.server.TickTask;
 import net.minecraft.server.level.ClientInformation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.util.ProblemReporter;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
@@ -19,7 +18,6 @@ import net.minecraft.world.food.FoodData;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.portal.TeleportTransition;
-import net.minecraft.world.level.storage.TagValueInput;
 import net.minecraft.world.phys.Vec3;
 import org.jspecify.annotations.NonNull;
 
@@ -29,21 +27,6 @@ public class BotPlayer extends ServerPlayer {
         super(server, level, profile, info);
 
         this.setGameMode(GameType.SURVIVAL);
-    }
-
-    public static void loadPlayerData(BotPlayer player) {
-        player.level().getServer().getPlayerList()
-                .loadPlayerData(player.nameAndId())
-                .map(tag -> TagValueInput.create(
-                        ProblemReporter.DISCARDING,
-                        player.registryAccess(),
-                        tag
-                ))
-                .ifPresent(valueInput -> {
-                    player.load(valueInput);
-                    player.loadAndSpawnEnderPearls(valueInput);
-                    player.loadAndSpawnParentVehicle(valueInput);
-                });
     }
 
     @Override
