@@ -3,10 +3,13 @@ package net.nerol.pvp_bot.commands;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.coordinates.Vec3Argument;
+import net.minecraft.network.DisconnectionDetails;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -21,6 +24,8 @@ import java.util.Set;
 
 public final class BotCommand {
     private static final String name = "PracticeBot";
+    private static final SimpleCommandExceptionType BOT_NOT_FOUND =
+            new SimpleCommandExceptionType(Component.literal("Bot not found!"));
 
     public static void register() {
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
@@ -31,7 +36,7 @@ public final class BotCommand {
         d.register(Commands.literal("pvpbot").requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
             .then(
                 Commands.literal("kill")
-                    .executes(ctx -> kill(ctx.getSource()))
+                    .executes(ctx -> disconnect(ctx.getSource()))
                         .then(
                             Commands.argument("botname", StringArgumentType.word())
                                 .suggests((ctx, builder) -> {
@@ -46,7 +51,7 @@ public final class BotCommand {
                                     return builder.buildFuture();
                                 })
                                 .executes(ctx ->
-                                    kill(ctx.getSource(),
+                                    disconnectBotByName(ctx.getSource(),
                                             StringArgumentType.getString(ctx, "botname"))
                                 )
                         )
@@ -121,20 +126,31 @@ public final class BotCommand {
         return 1;
     }
 
-    private static int kill(CommandSourceStack src, String name) {
-        for (ServerPlayer bot : (src.getServer()).getPlayerList().getPlayers()) {
-            if (bot instanceof BotPlayer && bot.getPlainTextName().equalsIgnoreCase(name)) {
-                ((BotPlayer) bot).kill(Component.literal("Killed"));
+    private static void disconnectBot(ServerPlayer bot, String reason) {
+        if (bot instanceof BotPlayer) {
+            // Properly remove from the server like a real player logout
+            // bot.level().getServer().getPlayerList().remove(bot);
+
+            // Remove from the world
+            bot.connection.onDisconnect(new DisconnectionDetails(Component.literal(reason)));
+        }
+    }
+
+    private static int disconnectBotByName(CommandSourceStack src, String name) throws CommandSyntaxException {
+        for (ServerPlayer player : src.getServer().getPlayerList().getPlayers()) {
+            if (player instanceof BotPlayer bot && bot.getName().getString().equalsIgnoreCase(name)) {
+                disconnectBot(bot, "Disconnected by command");
                 return 1;
             }
         }
-        return 0;
+        throw new SimpleCommandExceptionType(Component.literal("Bot not found!")).create();
     }
 
-    private static int kill(CommandSourceStack src) {
+    private static int disconnect(CommandSourceStack src) {
         for (ServerPlayer bot : (src.getServer()).getPlayerList().getPlayers()) {
             if (bot instanceof BotPlayer) {
-                ((BotPlayer) bot).kill(Component.literal("Killed"));
+                disconnectBot(bot, "Disconnected by command");
+
             }
         }
         return 1;

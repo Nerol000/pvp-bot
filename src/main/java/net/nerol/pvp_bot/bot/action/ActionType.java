@@ -1,22 +1,23 @@
 package net.nerol.pvp_bot.bot.action;
 
-public enum Action {
+public enum ActionType {
     /// Movement
     JUMP,
-    SNEAK,
-    SPRINT,
-    STRAFE_LEFT,
-    STRAFE_RIGHT,
-    WALK_FORWARD,
-    WALK_BACKWARD,
+    SNEAK, // sticky
+    SPRINT, // sticky
+    STRAFE_LEFT, // sticky
+    STRAFE_RIGHT, // sticky
+    WALK_FORWARD, // sticky
+    WALK_BACKWARD, // sticky
 
     /// Gameplay
-    ATTACK,
+    LEFT_CLICK,
     PICK_BLOCK,
-    USE,
+    RIGHT_CLICK,
 
     /// Inventory
     DROP_ITEM,
+    DROP_STACK,
     HOTBAR_SLOT_ONE,
     HOTBAR_SLOT_TWO,
     HOTBAR_SLOT_THREE,
@@ -27,5 +28,11 @@ public enum Action {
     HOTBAR_SLOT_EIGHT,
     HOTBAR_SLOT_NINE,
     OPEN_INVENTORY,
-    SWAP_HANDS
+    SWAP_HANDS,
+
+    /// Camera
+    LOOK,
+    TURN,
+
+    STOP // Stops current action
 }

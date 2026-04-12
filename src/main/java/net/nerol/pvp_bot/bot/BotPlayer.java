@@ -122,10 +122,9 @@ public class BotPlayer extends ServerPlayer {
 
         MinecraftServer server = this.level().getServer();
 
-        botPlayerDisconnect(Component.literal("Died"));
+        botPlayerDisconnect(this.getCombatTracker().getDeathMessage());
 
         server.execute(() -> {
-
             ServerPlayer p = this.connection.player;
             if (p instanceof BotPlayer bot) {
                 bot.setHealth(20.0F);
