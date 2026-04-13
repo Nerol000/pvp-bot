@@ -14,7 +14,6 @@ import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.food.FoodData;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.portal.TeleportTransition;
@@ -118,21 +117,13 @@ public class BotPlayer extends ServerPlayer {
     @Override
     public void die(@NonNull DamageSource cause) {
         shakeOff();
+        // super.die() drops inventory (respecting keepInventory) and fires death events.
+        // State after this call is exactly what should be persisted.
         super.die(cause);
-
-        MinecraftServer server = this.level().getServer();
-
+        // Explicitly save now — after keepInventory has been applied but before disconnect,
+        // since onDisconnect's internal save may be skipped due to SilentGameListener state.
+        ((net.nerol.pvp_bot.mixin.PlayerListInvoker) this.server.getPlayerList()).invokeSave(this);
         botPlayerDisconnect(this.getCombatTracker().getDeathMessage());
-
-        server.execute(() -> {
-            ServerPlayer p = this.connection.player;
-            if (p instanceof BotPlayer bot) {
-                bot.setHealth(20.0F);
-                bot.foodData = new FoodData();
-                bot.setExperienceLevels(0);
-                bot.setExperiencePoints(0);
-            }
-        });
     }
 
     public boolean isBot() {
