@@ -30,12 +30,12 @@ public class ActionPack {
     // Sticky setters
     // -------------------------------------------------------------------------
 
-    public void setForward(boolean value)     { forward = value; }
-    public void setBackward(boolean value)    { backward = value; }
-    public void setStrafeLeft(boolean value)  { strafeLeft = value; }
-    public void setStrafeRight(boolean value) { strafeRight = value; }
-    public void setSprinting(boolean value)   { sprinting = value; }
-    public void setSneaking(boolean value)    { sneaking = value; }
+    public void setForward(boolean value)     { forward = value; if (value) backward = false; }
+    public void setBackward(boolean value)    { backward = value; if (value) forward = false; }
+    public void setStrafeLeft(boolean value)  { strafeLeft = value; if (value) strafeRight = false; }
+    public void setStrafeRight(boolean value) { strafeRight = value; if (value) strafeLeft = false; }
+    public void setSprinting(boolean value)   { sprinting = value; if (value) sneaking = false; }
+    public void setSneaking(boolean value)    { sneaking = value; if (value) sprinting = false; }
 
     /** Clears all sticky movement state. */
     public void stop() {
