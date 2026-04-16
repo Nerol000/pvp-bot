@@ -1,8 +1,14 @@
 package net.nerol.pvp_bot.bot.action;
 
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.EntityHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.nerol.pvp_bot.bot.BotPlayer;
 
 /**
@@ -22,6 +28,11 @@ public class ActionPack {
     private boolean sprinting;
     private boolean sneaking;
 
+    // Sticky interaction state
+    private boolean rightClicking;
+    private BlockPos breakingPos;
+    private Direction breakingFace;
+
     public ActionPack(BotPlayer bot) {
         this.bot = bot;
     }
@@ -37,7 +48,9 @@ public class ActionPack {
     public void setSprinting(boolean value)   { sprinting = value; if (value) sneaking = false; }
     public void setSneaking(boolean value)    { sneaking = value; if (value) sprinting = false; }
 
-    /** Clears all sticky movement state. */
+    public void setRightClicking(boolean value) { rightClicking = value; }
+
+    /** Clears all sticky state. */
     public void stop() {
         forward = false;
         backward = false;
@@ -45,6 +58,9 @@ public class ActionPack {
         strafeRight = false;
         sprinting = false;
         sneaking = false;
+        rightClicking = false;
+        breakingPos = null;
+        breakingFace = null;
     }
 
     // -------------------------------------------------------------------------
@@ -57,6 +73,7 @@ public class ActionPack {
         }
     }
 
+    /** Single left click — swings and attacks the nearest entity in reach. */
     public void leftClick() {
         bot.swing(InteractionHand.MAIN_HAND);
         bot.level().getEntities(bot, bot.getBoundingBox().inflate(4.0))
@@ -69,8 +86,67 @@ public class ActionPack {
             .ifPresent(target -> bot.attack(target));
     }
 
+    /**
+     * Hold left click — mines the block the bot is looking at.
+     * Starts breaking on first call, continues on subsequent calls for the same block.
+     * Call each tick while the button should be held.
+     */
+    public void leftClickHold() {
+        HitResult hit = bot.pick(5.0, 0, false);
+        if (!(hit instanceof BlockHitResult blockHit)) {
+            breakingPos = null;
+            breakingFace = null;
+            return;
+        }
+        BlockPos pos = blockHit.getBlockPos();
+        Direction face = blockHit.getDirection();
+        if (!pos.equals(breakingPos)) {
+            // New block — start breaking
+            bot.gameMode.startDestroyBlock(pos, face);
+            breakingPos = pos;
+            breakingFace = face;
+        } else {
+            // Same block — continue breaking
+            bot.gameMode.continueDestroyBlock(pos, face);
+        }
+    }
+
+    /**
+     * Toggle right click on/off.
+     * When active, apply() calls applyRightClick() each tick which:
+     *  - interacts with entities (mounting, trading, etc.)
+     *  - uses items on blocks (chests, doors, etc.)
+     *  - uses items in air — mainhand first, offhand if mainhand passes
+     */
     public void rightClick() {
-        bot.startUsingItem(InteractionHand.MAIN_HAND);
+        setRightClicking(!rightClicking);
+    }
+
+    private void applyRightClick() {
+        HitResult hit = bot.pick(5.0, 0, false);
+
+        if (hit instanceof EntityHitResult entityHit) {
+            // Entity interaction: mounting, villager trades, etc.
+            InteractionResult result = bot.interactOn(entityHit.getEntity(), InteractionHand.MAIN_HAND);
+            if (!result.consumesAction()) {
+                bot.interactOn(entityHit.getEntity(), InteractionHand.OFF_HAND);
+            }
+        } else if (hit instanceof BlockHitResult blockHit) {
+            // Block interaction: chests, doors, crafting tables, etc.
+            // Try mainhand first, then offhand
+            InteractionResult result = bot.gameMode.useItemOn(
+                bot, bot.level(), bot.getMainHandItem(), InteractionHand.MAIN_HAND, blockHit);
+            if (!result.consumesAction()) {
+                bot.gameMode.useItemOn(
+                    bot, bot.level(), bot.getOffhandItem(), InteractionHand.OFF_HAND, blockHit);
+            }
+        } else {
+            // No target — use item in air (food, bows, potions, etc.)
+            InteractionResult result = bot.gameMode.useItem(bot, bot.level(), InteractionHand.MAIN_HAND);
+            if (!result.consumesAction()) {
+                bot.gameMode.useItem(bot, bot.level(), InteractionHand.OFF_HAND);
+            }
+        }
     }
 
     public void dropItem() {
@@ -131,6 +207,8 @@ public class ActionPack {
 
         bot.xxa = xxa;
         bot.zza = zza;
+
+        if (rightClicking) applyRightClick();
     }
 
     // -------------------------------------------------------------------------
@@ -151,7 +229,7 @@ public class ActionPack {
             case WALK_FORWARD     -> setForward(true);
             case WALK_BACKWARD    -> setBackward(true);
             case LEFT_CLICK       -> leftClick();
-            case RIGHT_CLICK      -> rightClick();
+            case RIGHT_CLICK      -> rightClick(); // toggles on/off
             case PICK_BLOCK       -> {} // requires raycasting — not yet implemented
             case DROP_ITEM        -> dropItem();
             case DROP_STACK       -> dropStack();
