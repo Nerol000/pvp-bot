@@ -128,10 +128,9 @@ public final class BotCommand {
 
     private static void disconnectBot(ServerPlayer bot, String reason) {
         if (bot instanceof BotPlayer) {
-            // Properly remove from the server like a real player logout
-            // bot.level().getServer().getPlayerList().remove(bot);
-
-            // Remove from the world
+            // Explicitly save before disconnect — onDisconnect's internal save may be skipped
+            // if SilentGameListener state flags were never set (e.g. hasLoggedIn).
+            ((net.nerol.pvp_bot.mixin.PlayerListInvoker) bot.getServer().getPlayerList()).invokeSave(bot);
             bot.connection.onDisconnect(new DisconnectionDetails(Component.literal(reason)));
         }
     }
