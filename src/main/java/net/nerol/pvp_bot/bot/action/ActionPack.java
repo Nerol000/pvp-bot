@@ -2,6 +2,7 @@ package net.nerol.pvp_bot.bot.action;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Inventory;
@@ -59,8 +60,7 @@ public class ActionPack {
         sprinting = false;
         sneaking = false;
         rightClicking = false;
-        breakingPos = null;
-        breakingFace = null;
+        abortBreaking();
     }
 
     // -------------------------------------------------------------------------
@@ -88,26 +88,48 @@ public class ActionPack {
 
     /**
      * Hold left click — mines the block the bot is looking at.
-     * Starts breaking on first call, continues on subsequent calls for the same block.
-     * Call each tick while the button should be held.
+     * Call each tick while the button should be held. The server advances
+     * mining progress automatically via gameMode.tick() inside super.tick().
+     * Sends ABORT when the bot looks away or stop() is called.
      */
     public void leftClickHold() {
         HitResult hit = bot.pick(5.0, 0, false);
+
         if (!(hit instanceof BlockHitResult blockHit)) {
-            breakingPos = null;
-            breakingFace = null;
+            abortBreaking();
             return;
         }
+
         BlockPos pos = blockHit.getBlockPos();
         Direction face = blockHit.getDirection();
+
         if (!pos.equals(breakingPos)) {
-            // New block — start breaking
-            bot.gameMode.startDestroyBlock(pos, face);
+            // Looking at a different block — abort previous and start new
+            abortBreaking();
+            bot.gameMode.handleBlockBreakAction(
+                pos,
+                ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK,
+                face,
+                bot.level().getMaxBuildHeight(),
+                0
+            );
             breakingPos = pos;
             breakingFace = face;
-        } else {
-            // Same block — continue breaking
-            bot.gameMode.continueDestroyBlock(pos, face);
+        }
+        // Same block — server ticks progress automatically, nothing to send
+    }
+
+    private void abortBreaking() {
+        if (breakingPos != null) {
+            bot.gameMode.handleBlockBreakAction(
+                breakingPos,
+                ServerboundPlayerActionPacket.Action.ABORT_DESTROY_BLOCK,
+                breakingFace,
+                bot.level().getMaxBuildHeight(),
+                0
+            );
+            breakingPos = null;
+            breakingFace = null;
         }
     }
 
@@ -127,9 +149,10 @@ public class ActionPack {
 
         if (hit instanceof EntityHitResult entityHit) {
             // Entity interaction: mounting, villager trades, etc.
-            InteractionResult result = bot.interactOn(entityHit.getEntity(), InteractionHand.MAIN_HAND);
+            // interactOn(Entity, InteractionHand, Vec3) — Vec3 is the hit location
+            InteractionResult result = bot.interactOn(entityHit.getEntity(), InteractionHand.MAIN_HAND, entityHit.getLocation());
             if (!result.consumesAction()) {
-                bot.interactOn(entityHit.getEntity(), InteractionHand.OFF_HAND);
+                bot.interactOn(entityHit.getEntity(), InteractionHand.OFF_HAND, entityHit.getLocation());
             }
         } else if (hit instanceof BlockHitResult blockHit) {
             // Block interaction: chests, doors, crafting tables, etc.
@@ -142,9 +165,10 @@ public class ActionPack {
             }
         } else {
             // No target — use item in air (food, bows, potions, etc.)
-            InteractionResult result = bot.gameMode.useItem(bot, bot.level(), InteractionHand.MAIN_HAND);
+            // useItem(ServerPlayer, Level, ItemStack, InteractionHand)
+            InteractionResult result = bot.gameMode.useItem(bot, bot.level(), bot.getMainHandItem(), InteractionHand.MAIN_HAND);
             if (!result.consumesAction()) {
-                bot.gameMode.useItem(bot, bot.level(), InteractionHand.OFF_HAND);
+                bot.gameMode.useItem(bot, bot.level(), bot.getOffhandItem(), InteractionHand.OFF_HAND);
             }
         }
     }
