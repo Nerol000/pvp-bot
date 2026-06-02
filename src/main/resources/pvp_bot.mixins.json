@@ -3,8 +3,11 @@
 	"package": "net.nerol.pvp_bot.mixin",
 	"compatibilityLevel": "JAVA_25",
 	"mixins": [
+        "AvatarAccessor",
         "BotKnockbackMixin",
-        "LivingEntityMixin"
+        "LivingEntityMixin",
+        "PlayerAccessor",
+        "ServerCommonPacketListenerImplAccessor"
 	],
 	"injectors": {
 		"defaultRequire": 1

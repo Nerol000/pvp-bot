@@ -1,5 +1,7 @@
 package net.nerol.pvp_bot.bot.action;
 
+import java.util.Random;
+
 public enum ActionType {
     /// Movement
     JUMP,
@@ -32,7 +34,15 @@ public enum ActionType {
 
     /// Camera
     LOOK,
+    LOOKAT,
     TURN,
 
-    STOP // Stops current action
+    STOP; // Stops current action
+
+    private static final Random RANDOM = new Random();
+
+    public static ActionType getRandomAction() {
+        ActionType[] values = {JUMP, SNEAK, SPRINT, STRAFE_LEFT, STRAFE_RIGHT, WALK_FORWARD, WALK_BACKWARD, LEFT_CLICK, RIGHT_CLICK, SWAP_HANDS, LOOK, TURN, STOP};
+        return values[RANDOM.nextInt(values.length)];
+    }
 }

@@ -2,22 +2,26 @@ package net.nerol.pvp_bot.commands;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.FloatArgumentType;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.coordinates.Vec3Argument;
-import net.minecraft.network.DisconnectionDetails;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
 import net.nerol.pvp_bot.PvPBot;
 import net.nerol.pvp_bot.bot.BotPlayer;
 import net.nerol.pvp_bot.bot.BotSpawner;
+import net.nerol.pvp_bot.mixin.ServerCommonPacketListenerImplAccessor;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -34,29 +38,6 @@ public final class BotCommand {
 
     public static void registerTree(CommandDispatcher<CommandSourceStack> d) {
         d.register(Commands.literal("pvpbot").requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
-            .then(
-                Commands.literal("kill")
-                    .executes(ctx -> disconnect(ctx.getSource()))
-                        .then(
-                            Commands.argument("botname", StringArgumentType.word())
-                                .suggests((ctx, builder) -> {
-                                    var players = ctx.getSource().getServer().getPlayerList().getPlayers();
-
-                                    for (ServerPlayer player : players) {
-                                        if (player instanceof BotPlayer bot) {
-                                            builder.suggest(bot.getName().getString());
-                                        }
-                                    }
-
-                                    return builder.buildFuture();
-                                })
-                                .executes(ctx ->
-                                    disconnectBotByName(ctx.getSource(),
-                                            StringArgumentType.getString(ctx, "botname"))
-                                )
-                        )
-            )
-
             .then(Commands.literal("spawn")
                 .executes(ctx -> {
                     var src = ctx.getSource();
@@ -115,7 +96,67 @@ public final class BotCommand {
                     )
                 )
             )
-        )));
+        ))
+        .then(Commands.literal("setPing").then(
+                Commands.argument("ping", IntegerArgumentType.integer(0))
+                        .suggests((ctx, builder) -> {
+                            for (int i = 0; i <= 250; i += 50) {
+                                builder.suggest(i);
+                            }
+                            return builder.buildFuture();
+                        })
+                        .executes(BotCommand::pingSet)
+        ))
+        .then(Commands.literal("setTarget")
+                .then(
+                        Commands.argument("bot", StringArgumentType.word())
+                                .suggests((ctx, builder) -> {
+                                    for (ServerPlayer player : ctx.getSource().getServer().getPlayerList().getPlayers()) {
+                                        if (player instanceof BotPlayer bot) {
+                                            builder.suggest(bot.getName().getString());
+                                        }
+                                    }
+                                    return builder.buildFuture();
+                                })
+                                .then(
+                                        Commands.argument("target", StringArgumentType.word())
+                                                .suggests((ctx, builder) -> {
+                                                    for (ServerPlayer player : ctx.getSource().getServer().getPlayerList().getPlayers()) {
+                                                        builder.suggest(player.getName().getString());
+                                                    }
+                                                    return builder.buildFuture();
+                                                })
+                                                .executes(ctx ->
+                                                        setTarget(
+                                                                ctx.getSource(),
+                                                                StringArgumentType.getString(ctx, "bot"),
+                                                                StringArgumentType.getString(ctx, "target")
+                                                        )
+                                                )
+                                )
+                )
+        )
+        .then(Commands.literal("kill")
+                .executes(ctx -> disconnect(ctx.getSource()))
+                .then(
+                        Commands.argument("botname", StringArgumentType.word())
+                                .suggests((ctx, builder) -> {
+                                    var players = ctx.getSource().getServer().getPlayerList().getPlayers();
+
+                                    for (ServerPlayer player : players) {
+                                        if (player instanceof BotPlayer bot) {
+                                            builder.suggest(bot.getName().getString());
+                                        }
+                                    }
+
+                                    return builder.buildFuture();
+                                })
+                                .executes(ctx ->
+                                        disconnectBotByName(ctx.getSource(),
+                                                StringArgumentType.getString(ctx, "botname"))
+                                )
+                )
+        ));
     }
 
     private static int spawn(CommandSourceStack src, Vec3 pos, float yaw, float pitch) {
@@ -126,13 +167,31 @@ public final class BotCommand {
         return 1;
     }
 
+    private static int setTarget(CommandSourceStack src, String botName, String target) throws CommandSyntaxException {
+        if (botName.equalsIgnoreCase(target))
+            throw new SimpleCommandExceptionType(Component.literal("Bot cannot target itself!")).create();
+
+        LivingEntity tar = null;
+        for (ServerPlayer player : src.getServer().getPlayerList().getPlayers()) {
+            if (player.getName().getString().equalsIgnoreCase(target)) {
+               tar  =  player;
+            }
+        }
+
+        if (tar == null) throw new SimpleCommandExceptionType(Component.literal("Target not found!")).create();
+
+        for (ServerPlayer player : src.getServer().getPlayerList().getPlayers()) {
+            if (player instanceof BotPlayer bot && bot.getName().getString().equalsIgnoreCase(botName)) {
+                bot.setTarget(tar);
+                return 1;
+            }
+        }
+        throw new SimpleCommandExceptionType(Component.literal("Bot not found!")).create();
+    }
+
     private static void disconnectBot(ServerPlayer bot, String reason) {
         if (bot instanceof BotPlayer) {
-            // Properly remove from the server like a real player logout
-            // bot.level().getServer().getPlayerList().remove(bot);
-
-            // Remove from the world
-            bot.connection.onDisconnect(new DisconnectionDetails(Component.literal(reason)));
+            ((BotPlayer) bot).botPlayerDisconnect(Component.literal(reason));
         }
     }
 
@@ -146,11 +205,25 @@ public final class BotCommand {
         throw new SimpleCommandExceptionType(Component.literal("Bot not found!")).create();
     }
 
-    private static int disconnect(CommandSourceStack src) {
+    private static int disconnect(CommandSourceStack src) throws CommandSyntaxException {
         for (ServerPlayer bot : (src.getServer()).getPlayerList().getPlayers()) {
             if (bot instanceof BotPlayer) {
                 disconnectBot(bot, "Disconnected by command");
+            }
+        }
+        return 1;
+    }
 
+    private static int pingSet(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        int value = IntegerArgumentType.getInteger(context, "value");
+        for (ServerPlayer bot : context.getSource().getServer().getPlayerList().getPlayers()) {
+            if (bot instanceof BotPlayer) {
+
+                ((BotPlayer) bot).ping = value;
+                ((ServerCommonPacketListenerImplAccessor) bot.connection).setLatency(value);
+                context.getSource().getServer().getPlayerList().broadcastAll(
+                        new ClientboundPlayerInfoUpdatePacket(ClientboundPlayerInfoUpdatePacket.Action.UPDATE_LATENCY, bot));
+                context.getSource().sendSuccess(() -> Component.literal("Set " + bot.getGameProfile().name() + "'s ping to " + value + "ms"), false);
             }
         }
         return 1;
@@ -181,8 +254,6 @@ public final class BotCommand {
         for (Integer i : used) {
             PvPBot.LOGGER.info(String.valueOf(i));
         }
-
-        // Find smallest missing index
 
         int i = 0;
         while (used.contains(i)) {

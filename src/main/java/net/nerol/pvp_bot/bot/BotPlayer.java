@@ -1,6 +1,8 @@
 package net.nerol.pvp_bot.bot;
 
 import com.mojang.authlib.GameProfile;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.network.DisconnectionDetails;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
@@ -13,24 +15,64 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.HumanoidArm;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.food.FoodData;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.portal.TeleportTransition;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import net.nerol.pvp_bot.bot.action.ActionPack;
+import net.nerol.pvp_bot.bot.action.ActionType;
+import net.nerol.pvp_bot.bot.action.BotAction;
+import net.nerol.pvp_bot.bot.reader.CSVReader;
 import org.jspecify.annotations.NonNull;
 
+import java.util.List;
+
 public class BotPlayer extends ServerPlayer {
+    private final ActionPack actionPack;
+    protected LivingEntity target;
+    public int ping = 0;
+    public static final byte SKIN_CAPE = 0x01;
+    public static final byte SKIN_JACKET = 0x02;
+    public static final byte SKIN_LEFT_SLEEVE = 0x04;
+    public static final byte SKIN_RIGHT_SLEEVE = 0x08;
+    public static final byte SKIN_LEFT_PANT = 0x10;
+    public static final byte SKIN_RIGHT_PANT = 0x20;
+    public static final byte SKIN_HAT = 0x40;
+    public int seconds = 0;
+    private List<BotAction> actions;
+    private int actionStep = 0;
 
     public BotPlayer(MinecraftServer server, ServerLevel level, GameProfile profile, ClientInformation info) {
         super(server, level, profile, info);
 
+        this.actionPack = new ActionPack(this);
         this.setGameMode(GameType.SURVIVAL);
+
+        this.target = null;
+
+        actions = CSVReader.load(CSVReader.bot_replay);
+    }
+
+
+    public void setMainHand(HumanoidArm arm) {
+        this.entityData.set(DATA_PLAYER_MAIN_HAND, arm);
     }
 
     @Override
     public void tick() {
+        if (seconds % 20 == 0) seconds = 0;
+
+        if (this.target != null && !this.target.isAlive()) this.target = null;
+
+        if (this.target == null) {
+            actionPack.stop();
+        }
+
         if (this.level().getServer().getTickCount() % 10 == 0) {
             this.connection.resetPosition();
             this.level().getChunkSource().move(this);
@@ -42,6 +84,13 @@ public class BotPlayer extends ServerPlayer {
             double startZ = this.getZ();
 
             super.tick();
+
+            if (!this.noPhysics) {
+                this.moveTowardsClosestSpace(this.getX() - this.getBbWidth() * 0.35, this.getZ() + this.getBbWidth() * 0.35);
+                this.moveTowardsClosestSpace(this.getX() - this.getBbWidth() * 0.35, this.getZ() - this.getBbWidth() * 0.35);
+                this.moveTowardsClosestSpace(this.getX() + this.getBbWidth() * 0.35, this.getZ() - this.getBbWidth() * 0.35);
+                this.moveTowardsClosestSpace(this.getX() + this.getBbWidth() * 0.35, this.getZ() + this.getBbWidth() * 0.35);
+            }
 
             this.doCheckFallDamage(
                     this.getDeltaMovement().x,
@@ -59,11 +108,27 @@ public class BotPlayer extends ServerPlayer {
                 this.resetLastActionTime();
             }
         } catch (NullPointerException ignored) {}
-        //this.xxa = 0;
-        //this.zza = 0;
-        //this.yya = 0;
-        //super.tick();
-        //this.travel(Vec3.ZERO);
+
+        actionPack.executeBotAction(actions.get(actionStep));
+        actionStep++;
+
+
+        /*
+        if (target != null && target.isAlive()) {
+            actionPack.lookAt(target);
+            actionPack.setSprinting(true);
+
+            if (this.hasLineOfSight(target)
+                    && this.distanceToSqr(target.getBoundingBox().getCenter()) <= Math.pow(getAttribute(Attributes.ENTITY_INTERACTION_RANGE).getValue(), 2)
+                    && this.getAttackStrengthScale(0.5f) >= 0.9f) {
+                actionPack.leftClick();
+            }
+        }
+        */
+
+        actionPack.apply();
+
+        seconds++;
     }
 
 
@@ -120,19 +185,58 @@ public class BotPlayer extends ServerPlayer {
         shakeOff();
         super.die(cause);
 
-        MinecraftServer server = this.level().getServer();
+        botPlayerDisconnect(Component.literal("Died"));
+    }
 
-        botPlayerDisconnect(this.getCombatTracker().getDeathMessage());
-
-        server.execute(() -> {
-            ServerPlayer p = this.connection.player;
-            if (p instanceof BotPlayer bot) {
-                bot.setHealth(20.0F);
-                bot.foodData = new FoodData();
-                bot.setExperienceLevels(0);
-                bot.setExperiencePoints(0);
+    private void moveTowardsClosestSpace(double x, double z) {
+        BlockPos pos = BlockPos.containing(x, this.getY(), z);
+        if (this.suffocatesAt(pos)) {
+            double xd = x - pos.getX();
+            double zd = z - pos.getZ();
+            Direction dir = null;
+            double closest = Double.MAX_VALUE;
+            for (Direction direction : new Direction[]{Direction.WEST, Direction.EAST, Direction.NORTH, Direction.SOUTH}) {
+                double axisDistance = direction.getAxis().choose(xd, 0.0, zd);
+                double distanceToEdge = direction.getAxisDirection() == Direction.AxisDirection.POSITIVE ? 1.0 - axisDistance : axisDistance;
+                if (distanceToEdge < closest && !this.suffocatesAt(pos.relative(direction))) {
+                    closest = distanceToEdge;
+                    dir = direction;
+                }
             }
-        });
+            if (dir != null) {
+                Vec3 oldMovement = this.getDeltaMovement();
+                if (dir.getAxis() == Direction.Axis.X) {
+                    this.setDeltaMovement(0.1 * dir.getStepX(), oldMovement.y, oldMovement.z);
+                } else {
+                    this.setDeltaMovement(oldMovement.x, oldMovement.y, 0.1 * dir.getStepZ());
+                }
+            }
+        }
+    }
+
+    private boolean suffocatesAt(final BlockPos pos) {
+        AABB boundingBox = this.getBoundingBox();
+        AABB testArea = new AABB(pos.getX(), boundingBox.minY, pos.getZ(), pos.getX() + 1.0, boundingBox.maxY, pos.getZ() + 1.0).deflate(1.0E-7);
+        return this.level().collidesWithSuffocatingBlock(this, testArea);
+    }
+
+    public LivingEntity getRandomTarget(float range) {
+        assert target == null;
+
+        List<LivingEntity> entities = this.level().getEntitiesOfClass(LivingEntity.class, this.getBoundingBox().inflate(range), e -> e != this && e.isAlive());
+
+        if (entities.isEmpty()) return null;
+
+        return entities.get(this.getRandom().nextInt(entities.size()));
+    }
+
+    public LivingEntity getTarget() {
+        return target;
+    }
+
+    public void setTarget(LivingEntity target) {
+        assert this.distanceToSqr(target) < 1048576; // cannot be further than 1024 blocks
+        this.target = target;
     }
 
     public boolean isBot() {
