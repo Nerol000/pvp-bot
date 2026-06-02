@@ -5,13 +5,23 @@ import net.nerol.pvp_bot.bot.action.BotAction;
 import java.io.*;
 import java.util.*;
 
+import static org.apache.commons.lang3.StringUtils.strip;
+
 public class CSVReader {
-    public static final String bot_replay = "bot_replay.csv";
+    public static final String bot_replay = "../src/main/resources/assets/pvp_bot/bot_replay.csv";
 
     public static List<BotAction> load(String file) {
         List<BotAction> actions = new ArrayList<>();
 
         try {
+            File f = new File(file);
+            System.out.println("Absolute path: " + f.getAbsolutePath());
+            System.out.println("Exists: " + f.exists());
+            System.out.println("Readable: " + f.canRead());
+            if (!f.exists()) {
+                throw new RuntimeException("CSV NOT FOUND");
+            }
+
             BufferedReader reader = new BufferedReader(new FileReader(file));
 
             reader.readLine();
@@ -22,7 +32,7 @@ public class CSVReader {
                 String[] p = line.split(",");
 
                 // action column
-                String actionStr = p[11];
+                String actionStr = strip(p[11]);
                 BotAction action = BotAction.valueOf(actionStr);
                 actions.add(action);
 

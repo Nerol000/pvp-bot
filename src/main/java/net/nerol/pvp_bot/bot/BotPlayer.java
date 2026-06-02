@@ -109,9 +109,10 @@ public class BotPlayer extends ServerPlayer {
             }
         } catch (NullPointerException ignored) {}
 
-        actionPack.executeBotAction(actions.get(actionStep));
-        actionStep++;
-
+        if (actionStep < actions.size() - 1) {
+            actionPack.executeBotAction(actions.get(actionStep));
+            actionStep++;
+        }
 
         /*
         if (target != null && target.isAlive()) {
