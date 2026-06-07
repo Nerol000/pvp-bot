@@ -36,7 +36,7 @@ public class CSVReader {
                 BotAction action = BotAction.valueOf(actionStr);
                 actions.add(action);
 
-                System.out.println(actionStr);
+                //System.out.println(actionStr);
 
             }
             reader.close();

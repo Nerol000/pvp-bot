@@ -17,15 +17,15 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.HumanoidArm;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.ai.attributes.AttributeInstance;
+import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.portal.TeleportTransition;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.nerol.pvp_bot.bot.action.ActionPack;
-import net.nerol.pvp_bot.bot.action.ActionType;
 import net.nerol.pvp_bot.bot.action.BotAction;
 import net.nerol.pvp_bot.bot.reader.CSVReader;
 import org.jspecify.annotations.NonNull;
@@ -51,8 +51,6 @@ public class BotPlayer extends ServerPlayer {
         super(server, level, profile, info);
 
         this.actionPack = new ActionPack(this);
-        this.setGameMode(GameType.SURVIVAL);
-
         this.target = null;
 
         actions = CSVReader.load(CSVReader.bot_replay);
@@ -109,10 +107,10 @@ public class BotPlayer extends ServerPlayer {
             }
         } catch (NullPointerException ignored) {}
 
-        if (actionStep < actions.size() - 1) {
-            actionPack.executeBotAction(actions.get(actionStep));
-            actionStep++;
-        }
+        //if (actionStep < actions.size() - 1) {
+        //    actionPack.executeBotAction(actions.get(actionStep));
+        //    actionStep++;
+        //}
 
         /*
         if (target != null && target.isAlive()) {
@@ -238,6 +236,50 @@ public class BotPlayer extends ServerPlayer {
     public void setTarget(LivingEntity target) {
         assert this.distanceToSqr(target) < 1048576; // cannot be further than 1024 blocks
         this.target = target;
+    }
+
+    public void resetAttributes() {
+        for (AttributeInstance instance : this.getAttributes().getAttributesToSync()) {
+            for (AttributeModifier modifier : List.copyOf(instance.getModifiers())) {
+                instance.removeModifier(modifier);
+            }
+        }
+
+        this.getAttribute(Attributes.ARMOR).setBaseValue(0.0);
+        this.getAttribute(Attributes.ARMOR_TOUGHNESS).setBaseValue(0.0);
+        this.getAttribute(Attributes.ATTACK_DAMAGE).setBaseValue(1.0);
+        this.getAttribute(Attributes.ATTACK_KNOCKBACK).setBaseValue(0.0);
+        this.getAttribute(Attributes.ATTACK_SPEED).setBaseValue(4.0);
+        this.getAttribute(Attributes.BLOCK_BREAK_SPEED).setBaseValue(1.0);
+        this.getAttribute(Attributes.BLOCK_INTERACTION_RANGE).setBaseValue(4.5);
+        this.getAttribute(Attributes.BURNING_TIME).setBaseValue(1.0);
+        this.getAttribute(Attributes.CAMERA_DISTANCE).setBaseValue(4.0);
+        this.getAttribute(Attributes.EXPLOSION_KNOCKBACK_RESISTANCE).setBaseValue(0.0);
+        this.getAttribute(Attributes.ENTITY_INTERACTION_RANGE).setBaseValue(3.0);
+        this.getAttribute(Attributes.FALL_DAMAGE_MULTIPLIER).setBaseValue(1.0);
+        //this.getAttribute(Attributes.FLYING_SPEED).setBaseValue(0.4);
+        //this.getAttribute(Attributes.FOLLOW_RANGE).setBaseValue(32.0);
+        this.getAttribute(Attributes.GRAVITY).setBaseValue(0.08);
+        this.getAttribute(Attributes.JUMP_STRENGTH).setBaseValue(0.42);
+        this.getAttribute(Attributes.KNOCKBACK_RESISTANCE).setBaseValue(0.0);
+        this.getAttribute(Attributes.LUCK).setBaseValue(0.0);
+        this.getAttribute(Attributes.MAX_ABSORPTION).setBaseValue(0.0);
+        this.getAttribute(Attributes.MAX_HEALTH).setBaseValue(20.0);
+        this.getAttribute(Attributes.MINING_EFFICIENCY).setBaseValue(0.0);
+        this.getAttribute(Attributes.MOVEMENT_EFFICIENCY).setBaseValue(0.0);
+        this.getAttribute(Attributes.MOVEMENT_SPEED).setBaseValue(0.1);
+        this.getAttribute(Attributes.OXYGEN_BONUS).setBaseValue(0.0);
+        this.getAttribute(Attributes.SAFE_FALL_DISTANCE).setBaseValue(3.0);
+        this.getAttribute(Attributes.SCALE).setBaseValue(1.0);
+        this.getAttribute(Attributes.SNEAKING_SPEED).setBaseValue(0.3);
+        //this.getAttribute(Attributes.SPAWN_REINFORCEMENTS_CHANCE).setBaseValue(0.0);
+        this.getAttribute(Attributes.STEP_HEIGHT).setBaseValue(0.6);
+        this.getAttribute(Attributes.SUBMERGED_MINING_SPEED).setBaseValue(0.2);
+        this.getAttribute(Attributes.SWEEPING_DAMAGE_RATIO).setBaseValue(0.0);
+        //this.getAttribute(Attributes.TEMPT_RANGE).setBaseValue(10.0);
+        this.getAttribute(Attributes.WATER_MOVEMENT_EFFICIENCY).setBaseValue(0.0);
+        this.getAttribute(Attributes.WAYPOINT_RECEIVE_RANGE).setBaseValue(60000000);
+        this.getAttribute(Attributes.WAYPOINT_TRANSMIT_RANGE).setBaseValue(60000000);
     }
 
     public boolean isBot() {

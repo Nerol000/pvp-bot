@@ -80,6 +80,12 @@ public final class BotSpawner {
                     false
             );
             instance.ping = 10;
+            instance.removeAllEffects();
+            instance.clearFire();
+            instance.setArrowCount(0);
+            instance.getFoodData().setSaturation(5);
+            instance.getFoodData().setFoodLevel(20);
+            instance.resetAttributes();
             instance.setYRot(yaw);
             instance.setXRot(pitch);
             server.getPlayerList().broadcastAll(new ClientboundRotateHeadPacket(instance, (byte) (instance.yHeadRot * 256 / 360)), instance.level().dimension());//instance.dimension);
