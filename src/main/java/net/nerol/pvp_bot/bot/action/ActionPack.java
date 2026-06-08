@@ -14,6 +14,7 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.*;
 import net.nerol.pvp_bot.bot.BotPlayer;
+import net.nerol.pvp_bot.bot.controller.BotAction;
 
 /**
  * Utility class that translates ActionType values into actual Minecraft API calls on a BotPlayer.

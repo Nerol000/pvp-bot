@@ -26,13 +26,21 @@ import net.minecraft.world.level.portal.TeleportTransition;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.nerol.pvp_bot.bot.action.ActionPack;
-import net.nerol.pvp_bot.bot.action.BotAction;
+import net.nerol.pvp_bot.bot.controller.BotAction;
+import net.nerol.pvp_bot.bot.controller.BotMode;
+import net.nerol.pvp_bot.bot.controller.BotState;
+import net.nerol.pvp_bot.bot.controller.LiveController;
+import net.nerol.pvp_bot.bot.controller.QTableLoader;
 import net.nerol.pvp_bot.bot.reader.CSVReader;
 import org.jspecify.annotations.NonNull;
 
 import java.util.List;
 
 public class BotPlayer extends ServerPlayer {
+    /** Flip to {@link BotMode#PLAYBACK} to drive actions from bot_replay.csv (debug
+     *  / fallback). {@link BotMode#LIVE} uses the trained Q-table to decide each tick. */
+    private static final BotMode MODE = BotMode.PLAYBACK;
+
     private final ActionPack actionPack;
     protected LivingEntity target;
     public int ping = 0;
@@ -44,8 +52,13 @@ public class BotPlayer extends ServerPlayer {
     public static final byte SKIN_RIGHT_PANT = 0x20;
     public static final byte SKIN_HAT = 0x40;
     public int seconds = 0;
+
+    // PLAYBACK-mode state
     private List<BotAction> actions;
     private int actionStep = 0;
+
+    // LIVE-mode brain (null in PLAYBACK)
+    private final LiveController controller;
 
     public BotPlayer(MinecraftServer server, ServerLevel level, GameProfile profile, ClientInformation info) {
         super(server, level, profile, info);
@@ -53,7 +66,20 @@ public class BotPlayer extends ServerPlayer {
         this.actionPack = new ActionPack(this);
         this.target = null;
 
-        actions = CSVReader.load(CSVReader.bot_replay);
+        if (MODE == BotMode.PLAYBACK) {
+            this.actions = CSVReader.load(CSVReader.bot_replay);
+            this.controller = null;
+        } else {
+            this.actions = null;
+            LiveController loaded = null;
+            try {
+                double[][] q = QTableLoader.load(QTableLoader.DEFAULT_RESOURCE);
+                loaded = new LiveController(q, /*exploit=*/ true);
+            } catch (Exception e) {
+                System.out.printf("LIVE mode: failed to load Q-table, bot will idle. %s%n", e.getMessage());
+            }
+            this.controller = loaded;
+        }
     }
 
 
@@ -107,23 +133,23 @@ public class BotPlayer extends ServerPlayer {
             }
         } catch (NullPointerException ignored) {}
 
-        //if (actionStep < actions.size() - 1) {
-        //    actionPack.executeBotAction(actions.get(actionStep));
-        //    actionStep++;
-        //}
+        if (MODE == BotMode.PLAYBACK) {
+            if (actions != null && actionStep < actions.size() - 1) {
+                actionPack.executeBotAction(actions.get(actionStep));
+                actionStep++;
+            }
+        } else if (MODE == BotMode.LIVE) {
+            if (controller != null && target != null && target.isAlive()) {
+                BotState state = BotState.observe(this, target);
+                BotAction action = controller.decide(state);
+                actionPack.executeBotAction(action);
 
-        /*
-        if (target != null && target.isAlive()) {
-            actionPack.lookAt(target);
-            actionPack.setSprinting(true);
 
-            if (this.hasLineOfSight(target)
-                    && this.distanceToSqr(target.getBoundingBox().getCenter()) <= Math.pow(getAttribute(Attributes.ENTITY_INTERACTION_RANGE).getValue(), 2)
-                    && this.getAttackStrengthScale(0.5f) >= 0.9f) {
-                actionPack.leftClick();
+
+
             }
         }
-        */
+
 
         actionPack.apply();
 

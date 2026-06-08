@@ -1,4 +1,4 @@
-package net.nerol.pvp_bot.bot.action;
+package net.nerol.pvp_bot.bot.controller;
 
 public enum BotAction {
     SPRINT,
