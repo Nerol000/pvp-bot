@@ -9,12 +9,16 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.decoration.ItemFrame;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.*;
 import net.nerol.pvp_bot.bot.BotPlayer;
 import net.nerol.pvp_bot.bot.controller.BotAction;
+
+import java.util.Optional;
 
 /**
  * Utility class that translates ActionType values into actual Minecraft API calls on a BotPlayer.
@@ -98,15 +102,39 @@ public class ActionPack {
     }
 
     public void leftClick() {
+        if (bot.getAttackStrengthScale(0.5f) < 0.9f) {
+            return;
+        }
+
         bot.swing(InteractionHand.MAIN_HAND);
-        bot.level().getEntities(bot, bot.getBoundingBox().inflate(4.0))
-                .stream()
-                .filter(e -> e != bot && e.isPickable())
-                .min((a, b) -> Double.compare(
-                        a.distanceToSqr(bot.position()),
-                        b.distanceToSqr(bot.position())
-                ))
-                .ifPresent(bot::attack);
+
+        double reach = bot.getAttribute(Attributes.ENTITY_INTERACTION_RANGE).getValue();
+        Vec3 eyePos  = bot.getEyePosition();
+        Vec3 lookVec = bot.getLookAngle();
+        Vec3 endPos  = eyePos.add(lookVec.scale(reach));
+
+        AABB searchBox = bot.getBoundingBox()
+                .expandTowards(lookVec.scale(reach))
+                .inflate(1.0);
+
+        Entity hit = null;
+        double closestDistSq = reach * reach;
+
+        for (Entity entity : bot.level().getEntities(bot, searchBox, e -> e != bot && e.isPickable())) {
+            AABB entityBox = entity.getBoundingBox().inflate(entity.getPickRadius());
+            Optional<Vec3> intersection = entityBox.clip(eyePos, endPos);
+            if (intersection.isPresent()) {
+                double distSq = eyePos.distanceToSqr(intersection.get());
+                if (distSq < closestDistSq) {
+                    hit = entity;
+                    closestDistSq = distSq;
+                }
+            }
+        }
+
+        if (hit != null) {
+            bot.attack(hit);
+        }
     }
 
     /**
@@ -115,7 +143,13 @@ public class ActionPack {
      * Call each tick while the button should be held.
      */
     public void breakBlock() {
-        HitResult hit = bot.pick(5.0, 0, false);
+        if (breakingPos != null && bot.level().getBlockState(breakingPos).isAir()) {
+            breakingPos = null;
+            breakingFace = null;
+        }
+
+        double reach = bot.getAttribute(Attributes.BLOCK_INTERACTION_RANGE).getValue();
+        HitResult hit = bot.pick(reach, 0, false);
         if (!(hit instanceof BlockHitResult blockHit)) {
             abortBreaking();
 
@@ -160,32 +194,59 @@ public class ActionPack {
     private void applyRightClick() {
         if (bot.isUsingItem()) return;
 
-        HitResult hit = bot.pick(5.0, 0, false);
+        // 1) Manual entity raycast (MC's interaction priority: entity before block)
+        double entityReach = bot.getAttribute(Attributes.ENTITY_INTERACTION_RANGE).getValue();
+        Vec3 eye  = bot.getEyePosition();
+        Vec3 look = bot.getLookAngle();
+        Vec3 end  = eye.add(look.scale(entityReach));
+        AABB searchBox = bot.getBoundingBox()
+                .expandTowards(look.scale(entityReach))
+                .inflate(1.0);
+
+        Entity hitEntity = null;
+        Vec3   hitLocation = null;
+        double closestDistSq = entityReach * entityReach;
+
+        for (Entity entity : bot.level().getEntities(bot, searchBox, e -> e != bot && e.isPickable())) {
+            AABB entityBox = entity.getBoundingBox().inflate(entity.getPickRadius());
+            Optional<Vec3> intersection = entityBox.clip(eye, end);
+            if (intersection.isPresent()) {
+                double distSq = eye.distanceToSqr(intersection.get());
+                if (distSq < closestDistSq) {
+                    hitEntity    = entity;
+                    hitLocation  = intersection.get();
+                    closestDistSq = distSq;
+                }
+            }
+        }
+
+        // 2) Block raycast at block reach
+        double blockReach = bot.getAttribute(Attributes.BLOCK_INTERACTION_RANGE).getValue();
+        HitResult blockHit = bot.pick(blockReach, 0, false);
 
         for (InteractionHand hand : InteractionHand.values()) {
-            if (hit instanceof EntityHitResult entityHit) {
+            if (hitEntity != null) {
                 bot.resetLastActionTime();
-                Entity entity = entityHit.getEntity();
-                boolean handWasEmpty = bot.getItemInHand(hand).isEmpty();
-                boolean itemFrameEmpty = (entity instanceof ItemFrame) && ((ItemFrame) entity).getItem().isEmpty();
-                Vec3 relativeHitPos = entityHit.getLocation().subtract(entity.getX(), entity.getY(), entity.getZ());
-                if (entity.interact(bot, hand, relativeHitPos).consumesAction()) {
-
+                boolean handWasEmpty   = bot.getItemInHand(hand).isEmpty();
+                boolean itemFrameEmpty = (hitEntity instanceof ItemFrame) && ((ItemFrame) hitEntity).getItem().isEmpty();
+                Vec3 relativeHitPos = hitLocation.subtract(hitEntity.getX(), hitEntity.getY(), hitEntity.getZ());
+                if (hitEntity.interact(bot, hand, relativeHitPos).consumesAction()) {
                     return;
                 }
-                if (bot.interactOn(entity, hand, relativeHitPos).consumesAction() && !(handWasEmpty && itemFrameEmpty)) {
+                if (bot.interactOn(hitEntity, hand, relativeHitPos).consumesAction() && !(handWasEmpty && itemFrameEmpty)) {
                     return;
                 }
-            } else if (hit instanceof BlockHitResult blockHit) {
+            } else if (blockHit instanceof BlockHitResult bh && bh.getType() == HitResult.Type.BLOCK) {
                 bot.resetLastActionTime();
                 ServerLevel world = bot.level();
-                BlockPos pos = blockHit.getBlockPos();
-                Direction side = blockHit.getDirection();
+                BlockPos pos = bh.getBlockPos();
+                Direction side = bh.getDirection();
                 if (pos.getY() < bot.level().getMaxY() - (side == Direction.UP ? 1 : 0) && world.mayInteract(bot, pos)) {
-                    InteractionResult result = bot.gameMode.useItemOn(bot, world, bot.getItemInHand(hand), hand, blockHit);
+                    InteractionResult result = bot.gameMode.useItemOn(bot, world, bot.getItemInHand(hand), hand, bh);
                     if (result instanceof InteractionResult.Success success) {
-                        if (success.swingSource() != InteractionResult.SwingSource.NONE)
+                        if (success.swingSource() != InteractionResult.SwingSource.NONE) {
                             bot.swing(hand);
+                        }
                         return;
                     }
                 }
@@ -341,6 +402,20 @@ public class ActionPack {
      * Must be called each tick before super.tick() / travel().
      */
     public void apply() {
+        if (lookInterpolation != null && lookInterpolation.ticksRemaining > 0) {
+            bot.setYRot(bot.getYRot() + lookInterpolation.deltaYaw);
+            bot.setXRot(Mth.clamp(bot.getXRot() + lookInterpolation.deltaPitch, -90f, 90f));
+            bot.yHeadRot = bot.getYRot();
+            bot.yBodyRot = bot.getYRot();
+            lookInterpolation.ticksRemaining--;
+            if (lookInterpolation.ticksRemaining <= 0) {
+                // snap to final target to avoid drift
+                bot.setYRot(lookInterpolation.targetYaw);
+                bot.setXRot(lookInterpolation.targetPitch);
+                lookInterpolation = null;
+            }
+        }
+
         bot.setShiftKeyDown(sneaking);
         bot.setSprinting(sprinting);
 

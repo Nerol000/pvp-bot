@@ -39,18 +39,11 @@ import java.util.List;
 public class BotPlayer extends ServerPlayer {
     /** Flip to {@link BotMode#PLAYBACK} to drive actions from bot_replay.csv (debug
      *  / fallback). {@link BotMode#LIVE} uses the trained Q-table to decide each tick. */
-    private static final BotMode MODE = BotMode.PLAYBACK;
+    private static final BotMode MODE = BotMode.LIVE;
 
     private final ActionPack actionPack;
     protected LivingEntity target;
     public int ping = 0;
-    public static final byte SKIN_CAPE = 0x01;
-    public static final byte SKIN_JACKET = 0x02;
-    public static final byte SKIN_LEFT_SLEEVE = 0x04;
-    public static final byte SKIN_RIGHT_SLEEVE = 0x08;
-    public static final byte SKIN_LEFT_PANT = 0x10;
-    public static final byte SKIN_RIGHT_PANT = 0x20;
-    public static final byte SKIN_HAT = 0x40;
     public int seconds = 0;
 
     // PLAYBACK-mode state
