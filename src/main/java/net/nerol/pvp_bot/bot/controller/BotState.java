@@ -10,17 +10,15 @@ public final class BotState {
 
     public final int distance;       // 0=NEAR (<5), 1=MID (<10), 2=FAR
     public final int direction;      // 0..7, 0 = FRONT (target dead ahead)
-    public final boolean sprinting;
 
-    public BotState(int distance, int direction, boolean sprinting) {
+    public BotState(int distance, int direction) {
         this.distance = distance;
         this.direction = direction;
-        this.sprinting = sprinting;
     }
 
-    /** Matches simulator State.toIndex(): (sprint ? 24 : 0) + distance*8 + direction. */
+    /** Matches simulator State.toIndex(): distance*8 + direction (0..23). */
     public int toIndex() {
-        return (sprinting ? 24 : 0) + distance * 8 + direction;
+        return distance * 8 + direction;
     }
 
     /** Build the state from a live Minecraft observation. The relative-bearing math
@@ -44,6 +42,6 @@ public final class BotState {
         double relative = ((bearingToTarget - bot.getYRot()) % 360.0 + 360.0 + 22.5) % 360.0;
         int directionBucket = (int)(relative / 45.0);
 
-        return new BotState(distanceBucket, directionBucket, bot.isSprinting());
+        return new BotState(distanceBucket, directionBucket);
     }
 }
