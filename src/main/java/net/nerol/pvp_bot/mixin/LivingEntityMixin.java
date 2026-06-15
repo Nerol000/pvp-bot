@@ -18,6 +18,7 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 // Courtesy of HeRoBot
@@ -61,6 +62,20 @@ public abstract class LivingEntityMixin extends Entity {
     }
 
     /**
+     * A BotPlayer holding up its shield takes no knockback at all. The shield-block path makes
+     * hurtServer return false so the ATTACKER skips its knockback, but the reaction knockback
+     * applied inside hurtServer still lands (and a real blocker would normally get it). Cancel
+     * knockback outright while the bot is actively blocking so it holds its ground.
+     */
+    @Inject(method = "knockback", at = @At("HEAD"), cancellable = true)
+    private void pvpbot_noKnockbackWhileBlocking(double strength, double x, double z, CallbackInfo ci) {
+        LivingEntity self = (LivingEntity) (Object) this;
+        if (self instanceof BotPlayer && self.isBlocking()) {
+            ci.cancel();
+        }
+    }
+
+    /**
      * Shield Stunning and fixing the shield
      */
     @Unique
@@ -70,14 +85,16 @@ public abstract class LivingEntityMixin extends Entity {
     @WrapOperation(method = "hurtServer", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/LivingEntity;applyItemBlocking(Lnet/minecraft/server/level/ServerLevel;Lnet/minecraft/world/damagesource/DamageSource;F)F"))
     private float trackBlockedHit(LivingEntity instance, ServerLevel serverLevel, DamageSource damageSource, float damageAmount, Operation<Float> original) {
         float blockedAmount = original.call(instance, serverLevel, damageSource, damageAmount);
-        // Only for non-BotPlayer players (BotPlayer does this in its own hurtServer)
-        blockedHit = blockedAmount > 0.0F && instance instanceof Player && !(instance instanceof BotPlayer);
+        // Applies to every player, BotPlayer included: a blocked hit must make hurtServer
+        // return false so the attacker skips knockback (Player.attack only knocks back when the
+        // hit "lands"). Excluding BotPlayer here — with no BotPlayer.hurtServer to pick up the
+        // slack — let the shielded bot eat full reaction knockback (shoved around / popped up).
+        blockedHit = blockedAmount > 0.0F && instance instanceof Player;
         return blockedAmount;
     }
 
     @ModifyReturnValue(method = "hurtServer", at = @At("RETURN"))
     private boolean handleBlockedHit(boolean original) {
-        // Still only works on non-botPlayer players
         if (blockedHit) {
             blockedHit = false;
             // Shield Stunning: Skip the damage tick completely, no invul frames - matches with servers now
