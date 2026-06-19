@@ -13,11 +13,14 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.level.Level;
 import net.nerol.pvp_bot.bot.BotPlayer;
+import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.Redirect;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 // Courtesy of HeRoBot
@@ -60,6 +63,14 @@ public abstract class LivingEntityMixin extends Entity {
         }
     }
 
+    @Inject(method = "knockback", at = @At("HEAD"), cancellable = true)
+    private void pvpbot_noKnockbackWhileBlocking(double strength, double x, double z, DamageSource source, float damage, boolean flag, CallbackInfo ci) {
+        LivingEntity self = (LivingEntity) (Object) this;
+        if (self instanceof BotPlayer && self.isBlocking()) {
+            ci.cancel();
+        }
+    }
+
     /**
      * Shield Stunning and fixing the shield
      */
@@ -70,8 +81,7 @@ public abstract class LivingEntityMixin extends Entity {
     @WrapOperation(method = "hurtServer", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/LivingEntity;applyItemBlocking(Lnet/minecraft/server/level/ServerLevel;Lnet/minecraft/world/damagesource/DamageSource;F)F"))
     private float trackBlockedHit(LivingEntity instance, ServerLevel serverLevel, DamageSource damageSource, float damageAmount, Operation<Float> original) {
         float blockedAmount = original.call(instance, serverLevel, damageSource, damageAmount);
-        // Only for non-BotPlayer players (BotPlayer does this in its own hurtServer)
-        blockedHit = blockedAmount > 0.0F && instance instanceof Player && !(instance instanceof BotPlayer);
+        blockedHit = blockedAmount > 0.0F && instance instanceof Player;
         return blockedAmount;
     }
 

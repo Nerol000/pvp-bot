@@ -10,17 +10,14 @@ public final class BotState {
 
     public final int distance;       // 0=NEAR (<5), 1=MID (<10), 2=FAR
     public final int direction;      // 0..7, 0 = FRONT (target dead ahead)
-    public final boolean sprinting;
 
-    public BotState(int distance, int direction, boolean sprinting) {
+    public BotState(int distance, int direction) {
         this.distance = distance;
         this.direction = direction;
-        this.sprinting = sprinting;
     }
 
-    /** Matches simulator State.toIndex(): (sprint ? 24 : 0) + distance*8 + direction. */
     public int toIndex() {
-        return (sprinting ? 24 : 0) + distance * 8 + direction;
+        return distance * 8 + direction;
     }
 
     /** Build the state from a live Minecraft observation. The relative-bearing math
@@ -32,11 +29,12 @@ public final class BotState {
         Vec3 b = bot.position();
         Vec3 t = target.position();
         double dx = t.x - b.x;
+        double dy = t.y - b.y;
         double dz = t.z - b.z;
 
         // Distance bucket — same thresholds as simulator.
-        double dist = Math.sqrt(dx * dx + dz * dz);
-        int distanceBucket = (dist < 5.0) ? 0 : (dist < 10.0) ? 1 : 2;
+        double dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+        int distanceBucket = (dist < 2.0) ? 0 : (dist <= 3.0) ? 1 : 2;
 
         // Bearing to target expressed in MC's yaw convention (yaw 0 = +z).
         // atan2(dz,dx) is math-convention (0 = +x), so subtract 90 to align.
@@ -44,6 +42,6 @@ public final class BotState {
         double relative = ((bearingToTarget - bot.getYRot()) % 360.0 + 360.0 + 22.5) % 360.0;
         int directionBucket = (int)(relative / 45.0);
 
-        return new BotState(distanceBucket, directionBucket, bot.isSprinting());
+        return new BotState(distanceBucket, directionBucket);
     }
 }

@@ -12,8 +12,8 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.decoration.ItemFrame;
 import net.minecraft.world.entity.player.Inventory;
-import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.*;
 import net.nerol.pvp_bot.bot.BotPlayer;
 import net.nerol.pvp_bot.bot.controller.BotAction;
@@ -38,10 +38,14 @@ public class ActionPack {
     private boolean sprinting = false;
     private boolean sneaking = false;
     private boolean using = false;
+    private boolean destroying = false;
 
     // Sticky interaction state
+    private boolean destroy = false;
     private BlockPos breakingPos;
     private Direction breakingFace;
+    private float destroyProgress = 0.0f;   // accumulated dig progress on breakingPos (0..1)
+    private int lastBreakStage = -1;
 
     private static class LookInterpolation {
         float targetYaw;
@@ -63,25 +67,32 @@ public class ActionPack {
         this.bot = bot;
     }
 
-    // -------------------------------------------------------------------------
     // Sticky setters
-    // -------------------------------------------------------------------------
-
-    public void setWalking(boolean value)     { forward = value; if (value) backward = false; }
-    public void setBackward(boolean value)    { backward = value; if (value) forward = false; }
-    public void setStrafeLeft(boolean value)  { strafeLeft = value; if (value) strafeRight = false; }
-    public void setStrafeRight(boolean value) { strafeRight = value; if (value) strafeLeft = false; }
-    public void setSprinting(boolean value)   { sprinting = value; forward = value; if (value) sneaking = false; if (value) backward = false; }
-    public void setSneaking(boolean value)    { sneaking = value; if (value) sprinting = false; }
-
-    private void using(boolean value) {
-        using = value;
-        if (!value && bot.isUsingItem()) {
-            bot.releaseUsingItem();
+    public void setWalking(boolean value)     {
+        forward = value;
+        if (value) backward = false;
+        sprinting = false;
+    }
+    public void setBackward(boolean value)    {
+        backward = value;
+        if (value) {
+            forward = false;
+            sprinting = false;
         }
     }
+    public void setStrafeLeft(boolean value)  { strafeLeft = value; if (value) strafeRight = false; }
+    public void setStrafeRight(boolean value) { strafeRight = value; if (value) strafeLeft = false; }
+    public void setSprinting(boolean value)   {
+        sprinting = value;
+        forward = value;
+        if (value) {
+            sneaking = false;
+            backward = false;
+        }
+    }
+    public void setSneaking(boolean value)    { sneaking = value; if (value) sprinting = false; }
 
-    /** Clears all sticky movement state. */
+    // Clears all sticky movement state.
     public void stop() {
         forward = false;
         backward = false;
@@ -91,6 +102,7 @@ public class ActionPack {
         sneaking = false;
         if (using && bot.isUsingItem()) bot.releaseUsingItem();
         using = false;
+        destroying = false;
 
         abortBreaking();
     }
@@ -101,13 +113,9 @@ public class ActionPack {
         }
     }
 
-    public void leftClick() {
-        if (bot.getAttackStrengthScale(0.5f) < 0.9f) {
-            return;
-        }
+    public void pickBlock() {}
 
-        bot.swing(InteractionHand.MAIN_HAND);
-
+    public void attack() {
         double reach = bot.getAttribute(Attributes.ENTITY_INTERACTION_RANGE).getValue();
         Vec3 eyePos  = bot.getEyePosition();
         Vec3 lookVec = bot.getLookAngle();
@@ -135,31 +143,29 @@ public class ActionPack {
         if (hit != null) {
             bot.attack(hit);
         }
+
+        bot.swing(InteractionHand.MAIN_HAND);
     }
 
-    /**
-     * Hold left click — mines the block the bot is looking at.
-     * Starts breaking on first call, continues on subsequent calls for the same block.
-     * Call each tick while the button should be held.
-     */
-    public void breakBlock() {
-        if (breakingPos != null && bot.level().getBlockState(breakingPos).isAir()) {
-            breakingPos = null;
-            breakingFace = null;
-        }
+    public void setDestroy(boolean destroy) {
+        destroying = destroy;
+        if (!destroy) abortBreaking();
+    }
 
+    private void destroy() {
         double reach = bot.getAttribute(Attributes.BLOCK_INTERACTION_RANGE).getValue();
         HitResult hit = bot.pick(reach, 0, false);
-        if (!(hit instanceof BlockHitResult blockHit)) {
-            abortBreaking();
-
+        if (!(hit instanceof BlockHitResult blockHit) || blockHit.getType() != HitResult.Type.BLOCK) {
+            clearBreakProgress();
             return;
         }
+
         BlockPos pos = blockHit.getBlockPos();
         Direction face = blockHit.getDirection();
+        BlockState state = bot.level().getBlockState(pos);
+
         if (!pos.equals(breakingPos)) {
-            // Looking at a different block — abort previous and start new
-            abortBreaking();
+            clearBreakProgress();
             bot.gameMode.handleBlockBreakAction(
                     pos,
                     ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK,
@@ -169,8 +175,26 @@ public class ActionPack {
             );
             breakingPos = pos;
             breakingFace = face;
+            destroyProgress = 0.0f;
         }
-        // Same block — server ticks progress automatically, nothing to send
+        destroyProgress += state.getDestroyProgress(bot, bot.level(), pos);
+        if (destroyProgress >= 1.0f) {
+            bot.gameMode.handleBlockBreakAction(
+                    pos,
+                    ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK,
+                    face,
+                    bot.level().getMaxY(),
+                    0
+            );
+            clearBreakProgress();
+            return;
+        }
+
+        int stage = (int) (destroyProgress * 10.0f);
+        if (stage != lastBreakStage) {
+            bot.level().destroyBlockProgress(bot.getId(), pos, stage);
+            lastBreakStage = stage;
+        }
     }
 
     private void abortBreaking() {
@@ -182,13 +206,32 @@ public class ActionPack {
                     bot.level().getMaxY(),
                     0
             );
-            breakingPos = null;
-            breakingFace = null;
+        }
+        clearBreakProgress();
+    }
+
+    /** Remove the crack overlay from the block we were mining (if any) and reset dig state. */
+    private void clearBreakProgress() {
+        if (breakingPos != null) {
+            bot.level().destroyBlockProgress(bot.getId(), breakingPos, -1);
+        }
+        breakingPos = null;
+        breakingFace = null;
+        destroyProgress = 0.0f;
+        lastBreakStage = -1;
+    }
+
+    public void use(boolean use) {
+        using = use;
+        if (!use && bot.isUsingItem()) {
+            bot.releaseUsingItem();
         }
     }
 
-    public void rightClick() {
-        using(!using);
+    public void interact() {
+        using = false;
+        bot.releaseUsingItem();
+        applyRightClick();
     }
 
     private void applyRightClick() {
@@ -250,22 +293,25 @@ public class ActionPack {
                         return;
                     }
                 }
-            } else {
-                ItemStack handItem = bot.getItemInHand(hand);
-                if (bot.gameMode.useItem(bot, bot.level(), handItem, hand).consumesAction()) {
-                    return;
-                }
+            }
+
+            ItemStack handItem = bot.getItemInHand(hand);
+            if (bot.gameMode.useItem(bot, bot.level(), handItem, hand).consumesAction()) {
+                return;
             }
         }
     }
 
-    public void dropItem() {
+    public void drop() {
         bot.drop(false);
     }
 
     public void dropStack() {
         bot.drop(true);
     }
+
+    public void drop(int slot) {}
+    public void dropStack(int slot) {}
 
     public void swapHands() {
         ItemStack main = bot.getMainHandItem().copy();
@@ -280,11 +326,6 @@ public class ActionPack {
         }
     }
 
-
-    /**
-     * Sets the bot's look direction to an absolute yaw/pitch.
-     * yaw: degrees, 0 = south, positive = west. pitch: -90 = up, 90 = down.
-     */
     public void look(float yaw, float pitch) {
         bot.setYRot(yaw % 360);
         bot.setXRot(Mth.clamp(pitch, -90, 90));
@@ -431,6 +472,7 @@ public class ActionPack {
         bot.zza = zza;
 
         if (using) applyRightClick();
+        if (destroying) destroy();
     }
 
     public void executeBotAction(BotAction action) {
@@ -440,11 +482,13 @@ public class ActionPack {
             case MOVE_BACK -> setBackward(!backward);
             case STRAFE_LEFT -> setStrafeLeft(!strafeLeft);
             case STRAFE_RIGHT -> setStrafeRight(!strafeRight);
-            case ATTACK -> leftClick();
+            case ATTACK -> attack();
             case TURN_LEFT_45 -> turn(-45, 0);
             case TURN_RIGHT_45 -> turn(45, 0);
             case TURN_LEFT_90 -> turn(-90, 0);
             case TURN_RIGHT_90 -> turn(90, 0);
+            case JUMP -> jump();
+            case LOOK_AT_TARGET -> lookAt(bot.getTarget());
         }
     }
 }

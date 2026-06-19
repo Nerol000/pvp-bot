@@ -97,16 +97,33 @@ public final class BotCommand {
                 )
             )
         ))
-        .then(Commands.literal("setPing").then(
-                Commands.argument("ping", IntegerArgumentType.integer(0))
-                        .suggests((ctx, builder) -> {
-                            for (int i = 0; i <= 250; i += 50) {
-                                builder.suggest(i);
-                            }
-                            return builder.buildFuture();
-                        })
-                        .executes(BotCommand::pingSet)
-        ))
+            .then(Commands.literal("setPing")
+                    .then(Commands.argument("ping", IntegerArgumentType.integer(0))
+                            .suggests((ctx, builder) -> {
+                                for (int i = 0; i <= 250; i += 50) {
+                                    builder.suggest(i);
+                                }
+                                return builder.buildFuture();
+                            })
+                            // No bot name -> apply to every bot.
+                            .executes(ctx -> setPingAll(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "ping")))
+                            // Optional bot name -> apply to just that bot.
+                            .then(Commands.argument("bot", StringArgumentType.word())
+                                    .suggests((ctx, builder) -> {
+                                        for (ServerPlayer player : ctx.getSource().getServer().getPlayerList().getPlayers()) {
+                                            if (player instanceof BotPlayer bot) {
+                                                builder.suggest(bot.getName().getString());
+                                            }
+                                        }
+                                        return builder.buildFuture();
+                                    })
+                                    .executes(ctx -> setPingOne(
+                                            ctx.getSource(),
+                                            StringArgumentType.getString(ctx, "bot"),
+                                            IntegerArgumentType.getInteger(ctx, "ping")))
+                            )
+                    )
+            )
         .then(Commands.literal("setTarget")
                 .then(
                         Commands.argument("bot", StringArgumentType.word())
@@ -214,19 +231,37 @@ public final class BotCommand {
         return 1;
     }
 
-    private static int pingSet(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-        int value = IntegerArgumentType.getInteger(context, "value");
-        for (ServerPlayer bot : context.getSource().getServer().getPlayerList().getPlayers()) {
-            if (bot instanceof BotPlayer) {
+    /** Push a ping value onto a single bot: store it, set the connection latency, and
+     *  broadcast the tab-list update so clients show the new ping. */
+    private static void applyPing(BotPlayer bot, int ping) {
+        bot.ping = ping;
+        ((ServerCommonPacketListenerImplAccessor) bot.connection).setLatency(ping);
+        bot.level().getServer().getPlayerList().broadcastAll(
+                new ClientboundPlayerInfoUpdatePacket(ClientboundPlayerInfoUpdatePacket.Action.UPDATE_LATENCY, bot));
+    }
 
-                ((BotPlayer) bot).ping = value;
-                ((ServerCommonPacketListenerImplAccessor) bot.connection).setLatency(value);
-                context.getSource().getServer().getPlayerList().broadcastAll(
-                        new ClientboundPlayerInfoUpdatePacket(ClientboundPlayerInfoUpdatePacket.Action.UPDATE_LATENCY, bot));
-                context.getSource().sendSuccess(() -> Component.literal("Set " + bot.getGameProfile().name() + "'s ping to " + value + "ms"), false);
+    private static int setPingAll(CommandSourceStack src, int ping) {
+        int count = 0;
+        for (ServerPlayer player : src.getServer().getPlayerList().getPlayers()) {
+            if (player instanceof BotPlayer bot) {
+                applyPing(bot, ping);
+                count++;
             }
         }
-        return 1;
+        final int n = count;
+        src.sendSuccess(() -> Component.literal("Set ping to " + ping + "ms for " + n + " bot(s)"), false);
+        return count;
+    }
+
+    private static int setPingOne(CommandSourceStack src, String botName, int ping) throws CommandSyntaxException {
+        for (ServerPlayer player : src.getServer().getPlayerList().getPlayers()) {
+            if (player instanceof BotPlayer bot && bot.getName().getString().equalsIgnoreCase(botName)) {
+                applyPing(bot, ping);
+                src.sendSuccess(() -> Component.literal("Set " + bot.getName().getString() + "'s ping to " + ping + "ms"), false);
+                return 1;
+            }
+        }
+        throw BOT_NOT_FOUND.create();
     }
 
     public static String getNextBotName(MinecraftServer server, String base) {

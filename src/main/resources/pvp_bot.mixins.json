@@ -5,6 +5,8 @@
 	"mixins": [
         "AvatarAccessor",
         "BotKnockbackMixin",
+        "EntitySelectorParserAccessor",
+        "EntitySelectorParserMixin",
         "LivingEntityMixin",
         "PlayerAccessor",
         "ServerCommonPacketListenerImplAccessor"
