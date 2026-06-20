@@ -20,9 +20,11 @@ import net.minecraft.world.phys.Vec3;
 import net.nerol.pvp_bot.PvPBot;
 import net.nerol.pvp_bot.bot.BotPlayer;
 import net.nerol.pvp_bot.bot.BotSpawner;
+import net.nerol.pvp_bot.bot.controller.BrainType;
 import net.nerol.pvp_bot.mixin.ServerCommonPacketListenerImplAccessor;
 
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.Set;
 
 public final class BotCommand {
@@ -152,6 +154,30 @@ public final class BotCommand {
                                 )
                 )
         )
+        .then(Commands.literal("brain")
+                .then(Commands.argument("bot", StringArgumentType.word())
+                        .suggests((ctx, builder) -> {
+                            for (ServerPlayer player : ctx.getSource().getServer().getPlayerList().getPlayers()) {
+                                if (player instanceof BotPlayer bot) {
+                                    builder.suggest(bot.getName().getString());
+                                }
+                            }
+                            return builder.buildFuture();
+                        })
+                        .then(Commands.argument("type", StringArgumentType.word())
+                                .suggests((ctx, builder) -> {
+                                    builder.suggest("qtable");
+                                    builder.suggest("neural");
+                                    builder.suggest("fsm");
+                                    return builder.buildFuture();
+                                })
+                                .executes(ctx -> setBrainCmd(
+                                        ctx.getSource(),
+                                        StringArgumentType.getString(ctx, "bot"),
+                                        StringArgumentType.getString(ctx, "type")))
+                        )
+                )
+        )
         .then(Commands.literal("kill")
                 .executes(ctx -> disconnect(ctx.getSource()))
                 .then(
@@ -203,6 +229,27 @@ public final class BotCommand {
             }
         }
         throw new SimpleCommandExceptionType(Component.literal("Bot not found!")).create();
+    }
+
+    private static int setBrainCmd(CommandSourceStack src, String botName, String type) throws CommandSyntaxException {
+        BrainType brain;
+        try {
+            brain = BrainType.valueOf(type.toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new SimpleCommandExceptionType(Component.literal("Brain must be 'qtable' or 'neural'")).create();
+        }
+        for (ServerPlayer player : src.getServer().getPlayerList().getPlayers()) {
+            if (player instanceof BotPlayer bot && bot.getName().getString().equalsIgnoreCase(botName)) {
+                if (bot.setBrain(brain)) {
+                    src.sendSuccess(() -> Component.literal(
+                            "Set " + bot.getName().getString() + "'s brain to " + brain.name().toLowerCase(Locale.ROOT)), false);
+                    return 1;
+                }
+                throw new SimpleCommandExceptionType(Component.literal(
+                        "Failed to load " + type.toLowerCase(Locale.ROOT) + " brain (missing policy file?)")).create();
+            }
+        }
+        throw BOT_NOT_FOUND.create();
     }
 
     private static void disconnectBot(ServerPlayer bot, String reason) {

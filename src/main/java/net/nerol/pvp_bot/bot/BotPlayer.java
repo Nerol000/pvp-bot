@@ -27,10 +27,12 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.nerol.pvp_bot.bot.action.ActionPack;
 import net.nerol.pvp_bot.bot.controller.BotAction;
+import net.nerol.pvp_bot.bot.controller.BotBrain;
 import net.nerol.pvp_bot.bot.controller.BotMode;
-import net.nerol.pvp_bot.bot.controller.BotState;
-import net.nerol.pvp_bot.bot.controller.LiveController;
-import net.nerol.pvp_bot.bot.controller.QTableLoader;
+import net.nerol.pvp_bot.bot.controller.BrainType;
+import net.nerol.pvp_bot.bot.controller.FsmBrain;
+import net.nerol.pvp_bot.bot.controller.NeuralBrain;
+import net.nerol.pvp_bot.bot.controller.QTableBrain;
 import net.nerol.pvp_bot.bot.reader.CSVReader;
 import org.jspecify.annotations.NonNull;
 
@@ -41,6 +43,9 @@ public class BotPlayer extends ServerPlayer {
      *  / fallback). {@link BotMode#LIVE} uses the trained Q-table to decide each tick. */
     private static final BotMode MODE = BotMode.LIVE;
 
+    /** Default brain for LIVE mode; switch per-bot at runtime with {@code /pvpbot brain}. */
+    private static final BrainType DEFAULT_BRAIN = BrainType.QTABLE;
+
     private final ActionPack actionPack;
     protected LivingEntity target;
     public int ping = 0;
@@ -50,8 +55,8 @@ public class BotPlayer extends ServerPlayer {
     private List<BotAction> actions;
     private int actionStep = 0;
 
-    // LIVE-mode brain (null in PLAYBACK)
-    private final LiveController controller;
+    // LIVE-mode brain (null in PLAYBACK or if its policy file failed to load)
+    private BotBrain brain;
 
     public BotPlayer(MinecraftServer server, ServerLevel level, GameProfile profile, ClientInformation info) {
         super(server, level, profile, info);
@@ -61,18 +66,35 @@ public class BotPlayer extends ServerPlayer {
 
         if (MODE == BotMode.PLAYBACK) {
             this.actions = CSVReader.load(CSVReader.bot_replay);
-            this.controller = null;
+            this.brain = null;
         } else {
             this.actions = null;
-            LiveController loaded = null;
-            try {
-                double[][] q = QTableLoader.load(QTableLoader.DEFAULT_RESOURCE);
-                loaded = new LiveController(q, /*exploit=*/ true);
-            } catch (Exception e) {
-                System.out.printf("LIVE mode: failed to load Q-table, bot will idle. %s%n", e.getMessage());
-            }
-            this.controller = loaded;
+            this.brain = makeBrain(DEFAULT_BRAIN);
         }
+    }
+
+    private static BotBrain makeBrain(BrainType type) {
+        try {
+            return switch (type) {
+                case QTABLE -> new QTableBrain();
+                case NEURAL -> new NeuralBrain();
+                case FSM -> new FsmBrain();
+            };
+        } catch (Exception e) {
+            System.out.printf("Failed to load %s brain, bot will idle: %s%n", type, e.getMessage());
+            return null;
+        }
+    }
+
+    /** Swap this bot's brain at runtime (e.g. from {@code /pvpbot brain}). Returns false if the
+     *  requested brain's policy file couldn't be loaded — the current brain is then kept. */
+    public boolean setBrain(BrainType type) {
+        BotBrain b = makeBrain(type);
+        if (b == null) {
+            return false;
+        }
+        this.brain = b;
+        return true;
     }
 
 
@@ -132,14 +154,8 @@ public class BotPlayer extends ServerPlayer {
                 actionStep++;
             }
         } else if (MODE == BotMode.LIVE) {
-            if (controller != null && target != null && target.isAlive()) {
-                BotState state = BotState.observe(this, target);
-                BotAction action = controller.decide(state);
-                actionPack.executeBotAction(action);
-
-
-
-
+            if (brain != null && target != null && target.isAlive()) {
+                brain.act(this, target, actionPack);
             }
         }
 
