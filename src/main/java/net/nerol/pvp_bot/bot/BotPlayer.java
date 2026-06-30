@@ -22,18 +22,17 @@ import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.portal.TeleportTransition;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-import net.nerol.pvp_bot.PvPBot;
 import net.nerol.pvp_bot.bot.action.ActionPack;
-import net.nerol.pvp_bot.bot.controller.BotAction;
+import net.nerol.pvp_bot.bot.controller.BotBrain;
 import net.nerol.pvp_bot.bot.controller.BotMode;
-import net.nerol.pvp_bot.bot.controller.BotState;
-import net.nerol.pvp_bot.bot.controller.LiveController;
-import net.nerol.pvp_bot.bot.controller.QTableLoader;
-import net.nerol.pvp_bot.bot.gamemode.GameType;
+import net.nerol.pvp_bot.bot.controller.BrainType;
+import net.nerol.pvp_bot.bot.controller.dqn.NeuralBrain;
+import net.nerol.pvp_bot.bot.controller.BotAction;
+import net.nerol.pvp_bot.bot.controller.fsm.FSMBrain;
+import net.nerol.pvp_bot.bot.controller.qtable.QTableBrain;
 import net.nerol.pvp_bot.bot.reader.CSVReader;
 import org.jspecify.annotations.NonNull;
 
@@ -43,7 +42,9 @@ public class BotPlayer extends ServerPlayer {
     /** Flip to {@link BotMode#PLAYBACK} to drive actions from bot_replay.csv (debug
      *  / fallback). {@link BotMode#LIVE} uses the trained Q-table to decide each tick. */
     private static final BotMode MODE = BotMode.LIVE;
-    private GameType game_type = GameType.SWORD;
+
+    /** Default brain for LIVE mode; switch per-bot at runtime with {@code /pvpbot brain}. */
+    private static final BrainType DEFAULT_BRAIN = BrainType.QTABLE;
 
     private final ActionPack actionPack;
     protected LivingEntity target;
@@ -51,33 +52,49 @@ public class BotPlayer extends ServerPlayer {
     public int seconds = 0;
 
     // PLAYBACK-mode state
-    private final List<BotAction> actions;
+    private List<BotAction> actions;
     private int actionStep = 0;
 
-    // LIVE-mode brain (null in PLAYBACK)
-    private final LiveController controller;
+    // LIVE-mode brain (null in PLAYBACK or if its policy file failed to load)
+    private BotBrain brain;
 
     public BotPlayer(MinecraftServer server, ServerLevel level, GameProfile profile, ClientInformation info) {
         super(server, level, profile, info);
 
         this.actionPack = new ActionPack(this);
         this.target = null;
-        this.ping = 0;
 
         if (MODE == BotMode.PLAYBACK) {
             this.actions = CSVReader.load(CSVReader.bot_replay);
-            this.controller = null;
+            this.brain = null;
         } else {
             this.actions = null;
-            LiveController loaded = null;
-            try {
-                double[][] q = QTableLoader.load(QTableLoader.DEFAULT_RESOURCE);
-                loaded = new LiveController(q, /*exploit=*/ true);
-            } catch (Exception e) {
-                System.out.printf("LIVE mode: failed to load Q-table, bot will idle. %s%n", e.getMessage());
-            }
-            this.controller = loaded;
+            this.brain = makeBrain(DEFAULT_BRAIN);
         }
+    }
+
+    private static BotBrain makeBrain(BrainType type) {
+        try {
+            return switch (type) {
+                case QTABLE -> new QTableBrain();
+                case NEURAL -> new NeuralBrain();
+                case FSM -> new FSMBrain();
+            };
+        } catch (Exception e) {
+            System.out.printf("Failed to load %s brain, bot will idle: %s%n", type, e.getMessage());
+            return null;
+        }
+    }
+
+    /** Swap this bot's brain at runtime (e.g. from {@code /pvpbot brain}). Returns false if the
+     *  requested brain's policy file couldn't be loaded — the current brain is then kept. */
+    public boolean setBrain(BrainType type) {
+        BotBrain b = makeBrain(type);
+        if (b == null) {
+            return false;
+        }
+        this.brain = b;
+        return true;
     }
 
 
@@ -137,23 +154,14 @@ public class BotPlayer extends ServerPlayer {
                 actionStep++;
             }
         } else if (MODE == BotMode.LIVE) {
-            if (controller != null && target != null && target.isAlive()) {
-                BotState state = BotState.observe(this, target);
-                BotAction action = controller.decide(state);
-                actionPack.executeBotAction(action);
+            if (brain != null && target != null && target.isAlive()) {
+                brain.act(this, target, actionPack);
             }
         }
 
-        /*if (target != null && target.isAttackable()
-                && this.getAttackStrengthScale(0.5f) >= 1.0f) {
-            actionPack.lookAt(target);                  // face the target so leftClick's raycast connects
-            actionPack.setDestroy(true);
-            //actionPack.use(true);
-            //if (!this.isSprinting()) actionPack.executeBotAction(BotAction.SPRINT);
-        }*/
-
 
         actionPack.apply();
+
         seconds++;
     }
 
@@ -246,14 +254,23 @@ public class BotPlayer extends ServerPlayer {
         return this.level().collidesWithSuffocatingBlock(this, testArea);
     }
 
+    public LivingEntity getRandomTarget(float range) {
+        assert target == null;
+
+        List<LivingEntity> entities = this.level().getEntitiesOfClass(LivingEntity.class, this.getBoundingBox().inflate(range), e -> e != this && e.isAlive());
+
+        if (entities.isEmpty()) return null;
+
+        return entities.get(this.getRandom().nextInt(entities.size()));
+    }
+
     public LivingEntity getTarget() {
         return target;
     }
 
     public void setTarget(LivingEntity target) {
-        assert this.distanceToSqr(target) < 262144; // cannot be further than 512 blocks
+        assert this.distanceToSqr(target) < 1048576; // cannot be further than 1024 blocks
         this.target = target;
-        this.actionPack.lookAt(target);
     }
 
     public void resetAttributes() {
@@ -263,16 +280,13 @@ public class BotPlayer extends ServerPlayer {
             }
         }
 
-        this.getAttribute(Attributes.AIR_DRAG_MODIFIER).setBaseValue(1.0);
         this.getAttribute(Attributes.ARMOR).setBaseValue(0.0);
         this.getAttribute(Attributes.ARMOR_TOUGHNESS).setBaseValue(0.0);
         this.getAttribute(Attributes.ATTACK_DAMAGE).setBaseValue(1.0);
         this.getAttribute(Attributes.ATTACK_KNOCKBACK).setBaseValue(0.0);
         this.getAttribute(Attributes.ATTACK_SPEED).setBaseValue(4.0);
-        this.getAttribute(Attributes.BELOW_NAME_DISTANCE).setBaseValue(10.0);
         this.getAttribute(Attributes.BLOCK_BREAK_SPEED).setBaseValue(1.0);
         this.getAttribute(Attributes.BLOCK_INTERACTION_RANGE).setBaseValue(4.5);
-        this.getAttribute(Attributes.BOUNCINESS).setBaseValue(0.0);
         this.getAttribute(Attributes.BURNING_TIME).setBaseValue(1.0);
         this.getAttribute(Attributes.CAMERA_DISTANCE).setBaseValue(4.0);
         this.getAttribute(Attributes.EXPLOSION_KNOCKBACK_RESISTANCE).setBaseValue(0.0);
@@ -280,7 +294,6 @@ public class BotPlayer extends ServerPlayer {
         this.getAttribute(Attributes.FALL_DAMAGE_MULTIPLIER).setBaseValue(1.0);
         //this.getAttribute(Attributes.FLYING_SPEED).setBaseValue(0.4);
         //this.getAttribute(Attributes.FOLLOW_RANGE).setBaseValue(32.0);
-        this.getAttribute(Attributes.FRICTION_MODIFIER).setBaseValue(1.0);
         this.getAttribute(Attributes.GRAVITY).setBaseValue(0.08);
         this.getAttribute(Attributes.JUMP_STRENGTH).setBaseValue(0.42);
         this.getAttribute(Attributes.KNOCKBACK_RESISTANCE).setBaseValue(0.0);
@@ -290,7 +303,6 @@ public class BotPlayer extends ServerPlayer {
         this.getAttribute(Attributes.MINING_EFFICIENCY).setBaseValue(0.0);
         this.getAttribute(Attributes.MOVEMENT_EFFICIENCY).setBaseValue(0.0);
         this.getAttribute(Attributes.MOVEMENT_SPEED).setBaseValue(0.1);
-        this.getAttribute(Attributes.NAME_TAG_DISTANCE).setBaseValue(64.0);
         this.getAttribute(Attributes.OXYGEN_BONUS).setBaseValue(0.0);
         this.getAttribute(Attributes.SAFE_FALL_DISTANCE).setBaseValue(3.0);
         this.getAttribute(Attributes.SCALE).setBaseValue(1.0);
@@ -307,11 +319,5 @@ public class BotPlayer extends ServerPlayer {
 
     public boolean isBot() {
         return true;
-    }
-
-    public GameType getGameType() { return this.game_type; }
-
-    public void loadGameType (GameType gameType) {
-
     }
 }

@@ -1,4 +1,6 @@
-package net.nerol.pvp_bot.bot.controller;
+package net.nerol.pvp_bot.bot.controller.qtable;
+
+import net.nerol.pvp_bot.bot.controller.BotAction;
 
 import java.util.Random;
 

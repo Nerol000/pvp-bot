@@ -1,4 +1,4 @@
-package net.nerol.pvp_bot.bot.controller;
+package net.nerol.pvp_bot.bot.controller.qtable;
 
 import java.io.BufferedReader;
 import java.io.IOException;
