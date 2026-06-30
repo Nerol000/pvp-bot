@@ -18,7 +18,7 @@ public final class NeuralBrain implements BotBrain {
 
     @Override
     public void act(BotPlayer bot, LivingEntity target, ActionPack pack) {
-        applyAction(pack, policy.act(NeuralObservation.observe(bot, target)));
+        applyAction(pack, target, policy.act(NeuralObservation.observe(bot, target)));
     }
 
     /**
@@ -29,7 +29,7 @@ public final class NeuralBrain implements BotBrain {
      * ATTACK won't carry the sprint flag into the swing (no +0.5 sprint-knockback). That's the
      * most likely thing to tune if the neural bot's knockback feels weak in-game.
      */
-    private void applyAction(ActionPack pack, int a) {
+    private void applyAction(ActionPack pack, LivingEntity target, int a) {
         pack.setWalking(false);
         pack.setBackward(false);
         pack.setStrafeLeft(false);
@@ -49,6 +49,7 @@ public final class NeuralBrain implements BotBrain {
             case 11 -> pack.turn(4f, 0f);           // YAW_R_FINE
             case 12 -> pack.turn(0f, -8f);          // PITCH_UP
             case 13 -> pack.turn(0f, 8f);           // PITCH_DOWN
+            case 14 -> pack.lookAt(target);         // LOOK_AT_TARGET (snap exact aim)
             default -> { }                          // 0 = IDLE
         }
     }
