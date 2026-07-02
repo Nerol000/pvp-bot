@@ -11,4 +11,7 @@ public interface  PlayerAccessor {
     @Accessor("gameProfile")
     @Mutable
     void setGameProfile(GameProfile profile);
+
+    @Accessor("attackStrengthTicker")
+    void setAttackStrengthTicker(int ticks);
 }

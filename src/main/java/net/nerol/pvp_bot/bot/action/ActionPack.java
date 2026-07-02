@@ -12,9 +12,11 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.decoration.ItemFrame;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.*;
+import net.nerol.pvp_bot.PvPBot;
 import net.nerol.pvp_bot.bot.BotPlayer;
 import net.nerol.pvp_bot.bot.controller.BotAction;
 
@@ -38,14 +40,13 @@ public class ActionPack {
     private boolean sprinting = false;
     private boolean sneaking = false;
     private boolean using = false;
-    private boolean destroying = false;
 
     // Sticky interaction state
     private boolean destroy = false;
     private BlockPos breakingPos;
     private Direction breakingFace;
     private float destroyProgress = 0.0f;   // accumulated dig progress on breakingPos (0..1)
-    private int lastBreakStage = -1;
+    private int lastBreakStage = -1;        // last crack stage (0..9) broadcast for the overlay
 
     private static class LookInterpolation {
         float targetYaw;
@@ -67,32 +68,41 @@ public class ActionPack {
         this.bot = bot;
     }
 
+    // -------------------------------------------------------------------------
     // Sticky setters
-    public void setWalking(boolean value)     {
-        forward = value;
-        if (value) backward = false;
-        sprinting = false;
-    }
-    public void setBackward(boolean value)    {
-        backward = value;
-        if (value) {
-            forward = false;
-            sprinting = false;
-        }
-    }
+    // -------------------------------------------------------------------------
+
+    public void setWalking(boolean value)     { forward = value; if (value) backward = false; }
+    public void setBackward(boolean value)    { backward = value; if (value) forward = false; }
     public void setStrafeLeft(boolean value)  { strafeLeft = value; if (value) strafeRight = false; }
     public void setStrafeRight(boolean value) { strafeRight = value; if (value) strafeLeft = false; }
-    public void setSprinting(boolean value)   {
-        sprinting = value;
-        forward = value;
-        if (value) {
-            sneaking = false;
-            backward = false;
-        }
-    }
+    public void setSprinting(boolean value)   { sprinting = value; forward = value; if (value) sneaking = false; if (value) backward = false; }
     public void setSneaking(boolean value)    { sneaking = value; if (value) sprinting = false; }
 
-    // Clears all sticky movement state.
+    /**
+     * Sticky right-click: simulates holding the button down. While {@code use} is true,
+     * {@link #apply()} re-runs the interaction every tick (continuing item use — eating,
+     * drawing a bow, holding a shield up); passing false releases it and stops any
+     * in-progress use.
+     */
+    public void use(boolean use) {
+        using = use;
+        if (!use && bot.isUsingItem()) {
+            bot.releaseUsingItem();
+        }
+    }
+
+    /**
+     * Sticky block-breaking: simulates holding left-click on a block. While true,
+     * {@link #apply()} drives {@link #breakBlock()} every tick (start / continue mining the
+     * block being looked at); passing false stops and aborts any in-progress break.
+     */
+    public void setDestroying(boolean value) {
+        destroy = value;
+        if (!value) abortBreaking();
+    }
+
+    /** Clears all sticky movement state. */
     public void stop() {
         forward = false;
         backward = false;
@@ -102,7 +112,7 @@ public class ActionPack {
         sneaking = false;
         if (using && bot.isUsingItem()) bot.releaseUsingItem();
         using = false;
-        destroying = false;
+        destroy = false;
 
         abortBreaking();
     }
@@ -113,9 +123,13 @@ public class ActionPack {
         }
     }
 
-    public void pickBlock() {}
+    public void leftClick() {
+        if (bot.getAttackStrengthScale(0.5f) < 0.9f) {
+            return;
+        }
 
-    public void attack() {
+        bot.swing(InteractionHand.MAIN_HAND);
+
         double reach = bot.getAttribute(Attributes.ENTITY_INTERACTION_RANGE).getValue();
         Vec3 eyePos  = bot.getEyePosition();
         Vec3 lookVec = bot.getLookAngle();
@@ -143,18 +157,26 @@ public class ActionPack {
         if (hit != null) {
             bot.attack(hit);
         }
-
-        bot.swing(InteractionHand.MAIN_HAND);
     }
 
-    public void setDestroy(boolean destroy) {
-        destroying = destroy;
-        if (!destroy) abortBreaking();
-    }
-
-    private void destroy() {
+    /**
+     * Held left-click. Driven every tick by {@link #apply()} while {@code destroy} is set: mines
+     * whatever solid block is under the crosshair and in reach.
+     *
+     * <p>For a connectionless bot the server's {@code gameMode.tick()} never runs (it's ticked by
+     * the packet listener), so it neither auto-finishes the dig nor emits the crack animation. We
+     * drive both ourselves: accumulate the block's per-tick destroy progress, broadcast the destroy
+     * stage (0..9) to nearby players as it advances, and once progress reaches 1.0 send STOP so the
+     * server actually breaks the block. Looking at air mines nothing; a block placed into reach
+     * starts breaking next tick, and after one breaks the crosshair falls onto whatever is behind
+     * it and that dig begins — just like genuinely holding the button.
+     */
+    public void breakBlock() {
         double reach = bot.getAttribute(Attributes.BLOCK_INTERACTION_RANGE).getValue();
         HitResult hit = bot.pick(reach, 0, false);
+
+        // pick() returns a MISS-type BlockHitResult when nothing is in reach, so the type
+        // check matters — without it a miss reads as a "block" at the ray's end.
         if (!(hit instanceof BlockHitResult blockHit) || blockHit.getType() != HitResult.Type.BLOCK) {
             clearBreakProgress();
             return;
@@ -165,6 +187,8 @@ public class ActionPack {
         BlockState state = bot.level().getBlockState(pos);
 
         if (!pos.equals(breakingPos)) {
+            // New block under the crosshair: wipe the old block's crack overlay, then begin the
+            // dig. A fresh START on a different block implicitly supersedes any previous one.
             clearBreakProgress();
             bot.gameMode.handleBlockBreakAction(
                     pos,
@@ -176,9 +200,17 @@ public class ActionPack {
             breakingPos = pos;
             breakingFace = face;
             destroyProgress = 0.0f;
+            PvPBot.LOGGER.info("[dig] START {} botId={} players={}", pos, bot.getId(),
+                    bot.level().getServer().getPlayerList().getPlayerCount());
         }
-        destroyProgress += state.getDestroyProgress(bot, bot.level(), pos);
+
+        // Accumulate this block's per-tick mining progress (tool / haste / etc. all factor in via
+        // getDestroyProgress, exactly as for a real player). Once mined, send STOP so the server
+        // actually destroys it.
+        float perTick = state.getDestroyProgress(bot, bot.level(), pos);
+        destroyProgress += perTick;
         if (destroyProgress >= 1.0f) {
+            PvPBot.LOGGER.info("[dig] STOP {} progress={} perTick={} (broke)", pos, destroyProgress, perTick);
             bot.gameMode.handleBlockBreakAction(
                     pos,
                     ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK,
@@ -190,10 +222,14 @@ public class ActionPack {
             return;
         }
 
+        // Broadcast the crack overlay ourselves (the server won't, since gameMode.tick() is dead
+        // for the bot). destroyBlockProgress sends to nearby players, not the breaker.
         int stage = (int) (destroyProgress * 10.0f);
         if (stage != lastBreakStage) {
             bot.level().destroyBlockProgress(bot.getId(), pos, stage);
             lastBreakStage = stage;
+            PvPBot.LOGGER.info("[dig] stage {} progress={} perTick={} pos={} botId={}",
+                    stage, destroyProgress, perTick, pos, bot.getId());
         }
     }
 
@@ -221,16 +257,12 @@ public class ActionPack {
         lastBreakStage = -1;
     }
 
-    public void use(boolean use) {
-        using = use;
-        if (!use && bot.isUsingItem()) {
-            bot.releaseUsingItem();
-        }
-    }
-
-    public void interact() {
-        using = false;
-        bot.releaseUsingItem();
+    /**
+     * Non-sticky right-click: performs a single interaction this tick — use item / place
+     * block / interact with the entity or block being looked at — without holding the button
+     * down. For a held right-click (continuous use), call {@link #use(boolean)} instead.
+     */
+    public void rightClick() {
         applyRightClick();
     }
 
@@ -268,9 +300,11 @@ public class ActionPack {
         HitResult blockHit = bot.pick(blockReach, 0, false);
 
         for (InteractionHand hand : InteractionHand.values()) {
+            ItemStack handItem = bot.getItemInHand(hand);
+
             if (hitEntity != null) {
                 bot.resetLastActionTime();
-                boolean handWasEmpty   = bot.getItemInHand(hand).isEmpty();
+                boolean handWasEmpty   = handItem.isEmpty();
                 boolean itemFrameEmpty = (hitEntity instanceof ItemFrame) && ((ItemFrame) hitEntity).getItem().isEmpty();
                 Vec3 relativeHitPos = hitLocation.subtract(hitEntity.getX(), hitEntity.getY(), hitEntity.getZ());
                 if (hitEntity.interact(bot, hand, relativeHitPos).consumesAction()) {
@@ -279,13 +313,15 @@ public class ActionPack {
                 if (bot.interactOn(hitEntity, hand, relativeHitPos).consumesAction() && !(handWasEmpty && itemFrameEmpty)) {
                     return;
                 }
+                // Entity in the crosshair but it offered no interaction — don't stop here; fall
+                // through to using the held item so the bot still raises its shield.
             } else if (blockHit instanceof BlockHitResult bh && bh.getType() == HitResult.Type.BLOCK) {
                 bot.resetLastActionTime();
                 ServerLevel world = bot.level();
                 BlockPos pos = bh.getBlockPos();
                 Direction side = bh.getDirection();
                 if (pos.getY() < bot.level().getMaxY() - (side == Direction.UP ? 1 : 0) && world.mayInteract(bot, pos)) {
-                    InteractionResult result = bot.gameMode.useItemOn(bot, world, bot.getItemInHand(hand), hand, bh);
+                    InteractionResult result = bot.gameMode.useItemOn(bot, world, handItem, hand, bh);
                     if (result instanceof InteractionResult.Success success) {
                         if (success.swingSource() != InteractionResult.SwingSource.NONE) {
                             bot.swing(hand);
@@ -293,25 +329,26 @@ public class ActionPack {
                         return;
                     }
                 }
+                // Block offered no interaction — fall through to using the held item.
             }
 
-            ItemStack handItem = bot.getItemInHand(hand);
+            // Nothing above consumed the right-click: use the held item directly. This is what
+            // raises the shield (and eats food, draws a bow, ...), and now runs even when an
+            // entity or block is in the crosshair but offered no interaction — mirroring vanilla's
+            // fall-through instead of stopping at the entity/block branch.
             if (bot.gameMode.useItem(bot, bot.level(), handItem, hand).consumesAction()) {
                 return;
             }
         }
     }
 
-    public void drop() {
+    public void dropItem() {
         bot.drop(false);
     }
 
     public void dropStack() {
         bot.drop(true);
     }
-
-    public void drop(int slot) {}
-    public void dropStack(int slot) {}
 
     public void swapHands() {
         ItemStack main = bot.getMainHandItem().copy();
@@ -326,6 +363,11 @@ public class ActionPack {
         }
     }
 
+
+    /**
+     * Sets the bot's look direction to an absolute yaw/pitch.
+     * yaw: degrees, 0 = south, positive = west. pitch: -90 = up, 90 = down.
+     */
     public void look(float yaw, float pitch) {
         bot.setYRot(yaw % 360);
         bot.setXRot(Mth.clamp(pitch, -90, 90));
@@ -472,7 +514,7 @@ public class ActionPack {
         bot.zza = zza;
 
         if (using) applyRightClick();
-        if (destroying) destroy();
+        if (destroy) breakBlock();
     }
 
     public void executeBotAction(BotAction action) {
@@ -482,12 +524,14 @@ public class ActionPack {
             case MOVE_BACK -> setBackward(!backward);
             case STRAFE_LEFT -> setStrafeLeft(!strafeLeft);
             case STRAFE_RIGHT -> setStrafeRight(!strafeRight);
-            case ATTACK -> attack();
+            case ATTACK -> leftClick();
             case TURN_LEFT_45 -> turn(-45, 0);
             case TURN_RIGHT_45 -> turn(45, 0);
             case TURN_LEFT_90 -> turn(-90, 0);
             case TURN_RIGHT_90 -> turn(90, 0);
-            case JUMP -> jump();
+            // Snap aim onto the current target so the real entity raycast in leftClick() can
+            // connect — the in-game mirror of the simulator's LOOK_AT_TARGET. No-op if there's
+            // no target (lookAt null-checks).
             case LOOK_AT_TARGET -> lookAt(bot.getTarget());
         }
     }
