@@ -13,11 +13,10 @@ import java.util.Random;
  *    - exploit=false: epsilon-greedy. Reserved for the "learn dynamically"
  *      phase; not used yet.
  *
- *  Action ordering must match simulator's Action enum exactly. The shared order is:
- *    0 SPRINT, 1 MOVE_FORWARD, 2 MOVE_BACK, 3 STRAFE_LEFT, 4 STRAFE_RIGHT,
- *    5 ATTACK, 6 TURN_LEFT_45, 7 TURN_RIGHT_45, 8 TURN_LEFT_90, 9 TURN_RIGHT_90,
- *    10 JUMP. If anyone reorders one side without the other, the Q-table indexes
- *    the wrong action. */
+ *  Returns a {@link BotAction}. The chosen column index is bounded by the loaded
+ *  table's own action count, and {@code BotAction.values()} is the 15-action space in
+ *  {@code environment.py} order, so a trained table maps 1:1 onto the enum. If a table
+ *  ever has more columns than the enum has values, the index is clamped to the enum. */
 public final class LiveController {
 
     private final double[][] q;
@@ -35,17 +34,14 @@ public final class LiveController {
         this.epsilon = epsilon;
     }
 
+    /** Chooses an action for the given state. */
     public BotAction decide(BotState state) {
         int stateIdx = state.toIndex();
-        int actionIdx;
-
-        if (!exploit && rng.nextDouble() < epsilon) {
-            actionIdx = rng.nextInt(BotAction.values().length);
-        } else {
-            actionIdx = argmax(stateIdx);
-        }
-
-        return BotAction.values()[actionIdx];
+        int actionIdx = (!exploit && rng.nextDouble() < epsilon)
+                ? rng.nextInt(q[stateIdx].length)
+                : argmax(stateIdx);
+        int maxIdx = BotAction.values().length - 1;
+        return BotAction.values()[Math.min(actionIdx, maxIdx)];
     }
 
     private int argmax(int stateIdx) {

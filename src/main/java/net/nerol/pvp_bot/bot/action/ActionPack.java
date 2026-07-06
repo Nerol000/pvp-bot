@@ -476,19 +476,29 @@ public class ActionPack {
     }
 
     public void executeBotAction(BotAction action) {
+        // Per-tick impulse model: clear movement flags each tick, then set the chosen one, matching
+        // the simulator/environment.py (which apply per-tick impulses, not sticky toggles).
+        setWalking(false);
+        setBackward(false);
+        setStrafeLeft(false);
+        setStrafeRight(false);
+        setSprinting(false);
         switch (action) {
-            case SPRINT -> setSprinting(!sprinting);
-            case MOVE_FORWARD -> setWalking(!forward);
-            case MOVE_BACK -> setBackward(!backward);
-            case STRAFE_LEFT -> setStrafeLeft(!strafeLeft);
-            case STRAFE_RIGHT -> setStrafeRight(!strafeRight);
+            case FORWARD -> setWalking(true);
+            case SPRINT_FORWARD -> setSprinting(true);
+            case BACK -> setBackward(true);
+            case STRAFE_LEFT -> setStrafeLeft(true);
+            case STRAFE_RIGHT -> setStrafeRight(true);
             case ATTACK -> attack();
-            case TURN_LEFT_45 -> turn(-45, 0);
-            case TURN_RIGHT_45 -> turn(45, 0);
-            case TURN_LEFT_90 -> turn(-90, 0);
-            case TURN_RIGHT_90 -> turn(90, 0);
             case JUMP -> jump();
+            case YAW_L -> turn(-15f, 0f);
+            case YAW_R -> turn(15f, 0f);
+            case YAW_L_FINE -> turn(-4f, 0f);
+            case YAW_R_FINE -> turn(4f, 0f);
+            case PITCH_UP -> turn(0f, -8f);
+            case PITCH_DOWN -> turn(0f, 8f);
             case LOOK_AT_TARGET -> lookAt(bot.getTarget());
+            case IDLE -> { }
         }
     }
 }
