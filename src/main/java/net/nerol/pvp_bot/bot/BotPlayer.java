@@ -32,6 +32,9 @@ import net.nerol.pvp_bot.bot.controller.BrainType;
 import net.nerol.pvp_bot.bot.controller.dqn.NeuralBrain;
 import net.nerol.pvp_bot.bot.controller.BotAction;
 import net.nerol.pvp_bot.bot.controller.fsm.FSMBrain;
+import net.nerol.pvp_bot.bot.controller.fsm.Genome;
+import net.nerol.pvp_bot.bot.controller.fsm.GenomeLoader;
+import net.nerol.pvp_bot.bot.controller.fsm.ParameterizedFSMBrain;
 import net.nerol.pvp_bot.bot.controller.qtable.QTableBrain;
 import net.nerol.pvp_bot.bot.reader.CSVReader;
 import org.jspecify.annotations.NonNull;
@@ -79,6 +82,11 @@ public class BotPlayer extends ServerPlayer {
                 case QTABLE -> new QTableBrain();
                 case NEURAL -> new NeuralBrain();
                 case FSM -> new FSMBrain();
+                case CHAMPION -> new ParameterizedFSMBrain(Genome.champion());
+                case TD_MAX -> new ParameterizedFSMBrain(
+                        GenomeLoader.loadOrDefault(GenomeLoader.TD_MAX_RESOURCE, Genome.tdMax()));
+                case IMPROVE -> new ParameterizedFSMBrain(
+                        GenomeLoader.loadOrDefault(GenomeLoader.IMPROVE_RESOURCE, Genome.improve()));
             };
         } catch (Exception e) {
             System.out.printf("Failed to load %s brain, bot will idle: %s%n", type, e.getMessage());
