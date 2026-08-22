@@ -5,21 +5,25 @@ import net.minecraft.world.phys.Vec3;
 import net.nerol.pvp_bot.bot.BotPlayer;
 
 /** Mirror of the simulator's {@code State} class. Index layout must stay in lock-step
- *  with simulator/State.java so the Q-table the bot loads keys correctly. The table is
- *  {@code numStates = 24}: distance (0..2) x direction (0..7), no extra dimensions. */
+ *  with simulator/State.java and environment.py so the Q-table the bot loads keys correctly.
+ *  The table is {@code numStates = 48}: charged (0..1) x distance (0..2) x direction (0..7).
+ *  The charged bit lets the policy see whether its next swing is at full strength, so it can
+ *  learn to wait out the attack cooldown instead of spam-swinging. */
 public final class BotState {
 
+    public final int charged;        // 0 = recharging, 1 = attack fully charged
     public final int distance;       // 0=NEAR (<1.66666), 1=MID (<=3), 2=FAR
     public final int direction;      // 0..7, 0 = FRONT (target dead ahead)
 
-    public BotState(int distance, int direction) {
+    public BotState(int charged, int distance, int direction) {
+        this.charged = charged;
         this.distance = distance;
         this.direction = direction;
     }
 
-    /** Matches simulator State.toIndex(): distance*8 + direction (0..23). */
+    /** Matches environment.py state_index(): charged*24 + distance*8 + direction (0..47). */
     public int toIndex() {
-        return distance * 8 + direction;
+        return charged * 24 + distance * 8 + direction;
     }
 
     /** Build the state from a live Minecraft observation. The relative-bearing math
@@ -48,6 +52,11 @@ public final class BotState {
         double relative = ((bearingToTarget - bot.getYRot()) % 360.0 + 360.0 + 22.5) % 360.0;
         int directionBucket = (int)(relative / 45.0);
 
-        return new BotState(distanceBucket, directionBucket);
+        // Charged bit — mirrors environment.py (charge >= FULL_STRENGTH). The attack-strength
+        // scale reaches 1.0 only when the cooldown is fully recovered, so a swing here lands at
+        // full damage (and can crit / apply sprint knockback). partialTick 0 = current tick.
+        int chargedBucket = (bot.getAttackStrengthScale(0.0f) >= 1.0f) ? 1 : 0;
+
+        return new BotState(chargedBucket, distanceBucket, directionBucket);
     }
 }
