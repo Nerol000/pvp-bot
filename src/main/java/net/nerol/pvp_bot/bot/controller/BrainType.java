@@ -8,6 +8,10 @@ public enum BrainType {
     QTABLE,
     /** Neural-network policy loaded from policy.json (continuous obs, 360 yaw + pitch). */
     NEURAL,
-    /** Hand-coded rule-based baseline ({@link FSMBrain}); loads no files. */
-    FSM
+
+    FSM,
+
+    CHAMPION,
+    TD_MAX,
+    IMPROVE
 }

@@ -47,6 +47,11 @@ public class ActionPack {
     private float destroyProgress = 0.0f;   // accumulated dig progress on breakingPos (0..1)
     private int lastBreakStage = -1;
 
+    // Sticky aim-lock: while true, apply() re-snaps the bot's look onto its current target every
+    // tick (mirrors environment.py Bot.aim_lock). Latched by LOOK_AT_TARGET, released when the
+    // policy takes manual rotation control (YAW_*/PITCH_*).
+    private boolean aimLock = false;
+
     private static class LookInterpolation {
         float targetYaw;
         float targetPitch;
@@ -439,10 +444,34 @@ public class ActionPack {
     }
 
     /**
+     * Latches (or releases) sticky aim-lock. This ONLY sets a flag; the actual per-tick
+     * re-tracking happens in apply(). While latched, the bot keeps its look snapped onto its
+     * current target every tick until the policy takes manual rotation control (which calls
+     * setLookAtTarget(false)). Distinct from the one-shot lookAt(...) methods, which aim once
+     * and do not persist.
+     */
+    public void setLookAtTarget(boolean value) {
+        aimLock = value;
+    }
+
+    public boolean isLookingAtTarget() {
+        return aimLock;
+    }
+
+    /**
      * Pushes current sticky state into the bot's movement inputs.
      * Must be called each tick before super.tick() / travel().
      */
     public void apply() {
+        // Sticky aim-lock: re-track the current target every tick while latched, so aim persists
+        // through movement/attack/idle ticks (mirrors environment.py's per-tick re-snap).
+        if (aimLock) {
+            Entity target = bot.getTarget();
+            if (target != null) {
+                lookAt(target);
+            }
+        }
+
         if (lookInterpolation != null && lookInterpolation.ticksRemaining > 0) {
             bot.setYRot(bot.getYRot() + lookInterpolation.deltaYaw);
             bot.setXRot(Mth.clamp(bot.getXRot() + lookInterpolation.deltaPitch, -90f, 90f));
@@ -476,19 +505,29 @@ public class ActionPack {
     }
 
     public void executeBotAction(BotAction action) {
+        // Per-tick impulse model: clear movement flags each tick, then set the chosen one, matching
+        // the simulator/environment.py (which apply per-tick impulses, not sticky toggles).
+        setWalking(false);
+        setBackward(false);
+        setStrafeLeft(false);
+        setStrafeRight(false);
+        setSprinting(false);
         switch (action) {
-            case SPRINT -> setSprinting(!sprinting);
-            case MOVE_FORWARD -> setWalking(!forward);
-            case MOVE_BACK -> setBackward(!backward);
-            case STRAFE_LEFT -> setStrafeLeft(!strafeLeft);
-            case STRAFE_RIGHT -> setStrafeRight(!strafeRight);
+            case FORWARD -> setWalking(true);
+            case SPRINT_FORWARD -> setSprinting(true);
+            case BACK -> setBackward(true);
+            case STRAFE_LEFT -> setStrafeLeft(true);
+            case STRAFE_RIGHT -> setStrafeRight(true);
             case ATTACK -> attack();
-            case TURN_LEFT_45 -> turn(-45, 0);
-            case TURN_RIGHT_45 -> turn(45, 0);
-            case TURN_LEFT_90 -> turn(-90, 0);
-            case TURN_RIGHT_90 -> turn(90, 0);
             case JUMP -> jump();
-            case LOOK_AT_TARGET -> lookAt(bot.getTarget());
+            case YAW_L -> { setLookAtTarget(false); turn(-15f, 0f); }
+            case YAW_R -> { setLookAtTarget(false); turn(15f, 0f); }
+            case YAW_L_FINE -> { setLookAtTarget(false); turn(-4f, 0f); }
+            case YAW_R_FINE -> { setLookAtTarget(false); turn(4f, 0f); }
+            case PITCH_UP -> { setLookAtTarget(false); turn(0f, -8f); }
+            case PITCH_DOWN -> { setLookAtTarget(false); turn(0f, 8f); }
+            case LOOK_AT_TARGET -> { setLookAtTarget(true); lookAt(bot.getTarget()); }
+            case IDLE -> { }
         }
     }
 }

@@ -9,7 +9,9 @@ import java.io.IOException;
 
 /**
  * Tabular Q-table brain — the original behavior. Loads {@code qtable.csv} via
- * {@link QTableLoader} and runs the greedy policy through {@link LiveController}.
+ * {@link QTableLoader} and runs the greedy policy through {@link LiveController}, executing the
+ * chosen {@link net.nerol.pvp_bot.bot.controller.BotAction} via {@link ActionPack#executeBotAction}
+ * (same 15-action space as the neural brain).
  */
 public final class QTableBrain implements BotBrain {
     private final LiveController controller;

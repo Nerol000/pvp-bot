@@ -169,6 +169,9 @@ public final class BotCommand {
                                             builder.suggest("qtable");
                                             builder.suggest("neural");
                                             builder.suggest("fsm");
+                                            builder.suggest("champion");
+                                            builder.suggest("td_max");
+                                            builder.suggest("improve");
                                             return builder.buildFuture();
                                         })
                                         .executes(ctx -> setBrain(
@@ -261,7 +264,8 @@ public final class BotCommand {
         try {
             brain = BrainType.valueOf(type.toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
-            throw new SimpleCommandExceptionType(Component.literal("Brain must be 'qtable' or 'neural'")).create();
+            throw new SimpleCommandExceptionType(Component.literal(
+                    "Brain must be one of: qtable, neural, fsm, champion, td_max, improve")).create();
         }
         for (ServerPlayer player : src.getServer().getPlayerList().getPlayers()) {
             if (player instanceof BotPlayer bot && bot.getName().getString().equalsIgnoreCase(botName)) {
