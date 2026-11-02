@@ -13,5 +13,7 @@ public enum BrainType {
 
     CHAMPION,
     TD_MAX,
-    IMPROVE
+    IMPROVE,
+    /** Kit DQN policy loaded from policy_kit.json (66 obs, 22 actions incl. items/shield/bow). */
+    KIT_NEURAL
 }

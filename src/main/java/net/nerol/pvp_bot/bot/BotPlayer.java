@@ -35,6 +35,7 @@ import net.nerol.pvp_bot.bot.controller.fsm.FSMBrain;
 import net.nerol.pvp_bot.bot.controller.fsm.Genome;
 import net.nerol.pvp_bot.bot.controller.fsm.GenomeLoader;
 import net.nerol.pvp_bot.bot.controller.fsm.ParameterizedFSMBrain;
+import net.nerol.pvp_bot.bot.controller.kit.KitNeuralBrain;
 import net.nerol.pvp_bot.bot.controller.qtable.QTableBrain;
 import net.nerol.pvp_bot.bot.reader.CSVReader;
 import org.jspecify.annotations.NonNull;
@@ -87,6 +88,7 @@ public class BotPlayer extends ServerPlayer {
                         GenomeLoader.loadOrDefault(GenomeLoader.TD_MAX_RESOURCE, Genome.tdMax()));
                 case IMPROVE -> new ParameterizedFSMBrain(
                         GenomeLoader.loadOrDefault(GenomeLoader.IMPROVE_RESOURCE, Genome.improve()));
+                case KIT_NEURAL -> new KitNeuralBrain();
             };
         } catch (Exception e) {
             System.out.printf("Failed to load %s brain, bot will idle: %s%n", type, e.getMessage());
@@ -102,6 +104,7 @@ public class BotPlayer extends ServerPlayer {
             return false;
         }
         this.brain = b;
+        actionPack.setInputScale(1.0f);
         return true;
     }
 

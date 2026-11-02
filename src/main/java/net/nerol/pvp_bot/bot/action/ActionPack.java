@@ -52,6 +52,10 @@ public class ActionPack {
     // policy takes manual rotation control (YAW_*/PITCH_*).
     private boolean aimLock = false;
 
+    // Movement input multiplier applied in apply(). 1.0 = unchanged (all legacy brains); the kit
+    // brain sets 0.2 while an item is in use, which MC does client-side for real players.
+    private float inputScale = 1.0f;
+
     private static class LookInterpolation {
         float targetYaw;
         float targetPitch;
@@ -108,8 +112,13 @@ public class ActionPack {
         if (using && bot.isUsingItem()) bot.releaseUsingItem();
         using = false;
         destroying = false;
+        inputScale = 1.0f;
 
         abortBreaking();
+    }
+
+    public void setInputScale(float scale) {
+        inputScale = scale;
     }
 
     public void jump() {
@@ -497,8 +506,8 @@ public class ActionPack {
         if (strafeLeft)  xxa += 1.0f;
         if (strafeRight) xxa -= 1.0f;
 
-        bot.xxa = xxa;
-        bot.zza = zza;
+        bot.xxa = xxa * inputScale;
+        bot.zza = zza * inputScale;
 
         if (using) applyRightClick();
         if (destroying) destroy();

@@ -172,6 +172,7 @@ public final class BotCommand {
                                             builder.suggest("champion");
                                             builder.suggest("td_max");
                                             builder.suggest("improve");
+                                            builder.suggest("kit_neural");
                                             return builder.buildFuture();
                                         })
                                         .executes(ctx -> setBrain(
@@ -265,7 +266,7 @@ public final class BotCommand {
             brain = BrainType.valueOf(type.toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
             throw new SimpleCommandExceptionType(Component.literal(
-                    "Brain must be one of: qtable, neural, fsm, champion, td_max, improve")).create();
+                    "Brain must be one of: qtable, neural, fsm, champion, td_max, improve, kit_neural")).create();
         }
         for (ServerPlayer player : src.getServer().getPlayerList().getPlayers()) {
             if (player instanceof BotPlayer bot && bot.getName().getString().equalsIgnoreCase(botName)) {
