@@ -21,6 +21,12 @@ public final class NeuralBrain implements BotBrain {
     @Override
     public void act(BotPlayer bot, LivingEntity target, ActionPack pack) {
         int a = policy.act(NeuralObservation.observe(bot, target));
-        pack.executeBotAction(BotAction.values()[a]);
+        BotAction act = BotAction.values()[a];
+        pack.executeBotAction(act);
+        if (act == BotAction.ATTACK) {
+            // MC resets the charge on every swing (client side); the server only does it on a hit.
+            // Without this a missed swing keeps full charge, so the bot can swing again next tick.
+            bot.resetAttackStrengthTicker();
+        }
     }
 }
