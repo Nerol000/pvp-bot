@@ -516,6 +516,7 @@ public class ActionPack {
     public void executeBotAction(BotAction action) {
         // Per-tick impulse model: clear movement flags each tick, then set the chosen one, matching
         // the simulator/environment.py (which apply per-tick impulses, not sticky toggles).
+        boolean wasSprinting = sprinting;
         setWalking(false);
         setBackward(false);
         setStrafeLeft(false);
@@ -528,7 +529,12 @@ public class ActionPack {
             case STRAFE_LEFT -> setStrafeLeft(true);
             case STRAFE_RIGHT -> setStrafeRight(true);
             case ATTACK -> attack();
-            case JUMP -> jump();
+            case JUMP -> {
+                // Keep W + sprint held through a jump if already sprinting, like a player
+                // sprint-jumping (matches demo_env.py; gives Minecraft's sprint-jump boost).
+                if (wasSprinting) setSprinting(true);
+                jump();
+            }
             case YAW_L -> { setLookAtTarget(false); turn(-15f, 0f); }
             case YAW_R -> { setLookAtTarget(false); turn(15f, 0f); }
             case YAW_L_FINE -> { setLookAtTarget(false); turn(-4f, 0f); }
