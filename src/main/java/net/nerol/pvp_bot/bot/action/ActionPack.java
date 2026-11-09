@@ -467,6 +467,13 @@ public class ActionPack {
         return aimLock;
     }
 
+    // Held movement keys (part of the neural bot's observation).
+    public boolean isForward()     { return forward; }
+    public boolean isBackward()    { return backward; }
+    public boolean isStrafeLeft()  { return strafeLeft; }
+    public boolean isStrafeRight() { return strafeRight; }
+    public boolean isSprinting()   { return sprinting; }
+
     /**
      * Pushes current sticky state into the bot's movement inputs.
      * Must be called each tick before super.tick() / travel().
@@ -514,27 +521,16 @@ public class ActionPack {
     }
 
     public void executeBotAction(BotAction action) {
-        // Per-tick impulse model: clear movement flags each tick, then set the chosen one, matching
-        // the simulator/environment.py (which apply per-tick impulses, not sticky toggles).
-        boolean wasSprinting = sprinting;
-        setWalking(false);
-        setBackward(false);
-        setStrafeLeft(false);
-        setStrafeRight(false);
-        setSprinting(false);
+        // Sticky model: movement actions toggle a held key (matches demo_env.py); the held keys keep
+        // moving the bot in apply() while it attacks, jumps or turns.
         switch (action) {
-            case FORWARD -> setWalking(true);
-            case SPRINT_FORWARD -> setSprinting(true);
-            case BACK -> setBackward(true);
-            case STRAFE_LEFT -> setStrafeLeft(true);
-            case STRAFE_RIGHT -> setStrafeRight(true);
+            case FORWARD -> setWalking(!forward);
+            case SPRINT_FORWARD -> setSprinting(!sprinting);
+            case BACK -> setBackward(!backward);
+            case STRAFE_LEFT -> setStrafeLeft(!strafeLeft);
+            case STRAFE_RIGHT -> setStrafeRight(!strafeRight);
             case ATTACK -> attack();
-            case JUMP -> {
-                // Keep W + sprint held through a jump if already sprinting, like a player
-                // sprint-jumping (matches demo_env.py; gives Minecraft's sprint-jump boost).
-                if (wasSprinting) setSprinting(true);
-                jump();
-            }
+            case JUMP -> jump();
             case YAW_L -> { setLookAtTarget(false); turn(-15f, 0f); }
             case YAW_R -> { setLookAtTarget(false); turn(15f, 0f); }
             case YAW_L_FINE -> { setLookAtTarget(false); turn(-4f, 0f); }

@@ -4,21 +4,23 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.phys.Vec3;
 import net.nerol.pvp_bot.bot.BotPlayer;
+import net.nerol.pvp_bot.bot.action.ActionPack;
 
 /**
- * Builds the 13-float observation for {@link NeuralBrain}, mirroring
- * {@code RL/PythonTrainer/environment.py._observe()} field-for-field.
+ * Builds the 18-float observation for {@link NeuralBrain}, mirroring
+ * {@code RL/PythonTrainer/demo_env.py._observe()} field-for-field: environment.py's 13 values plus
+ * the held movement keys (W, S, A, D, sprint).
  *
  * <p>Conventions are kept independent of the sim-vs-MC yaw difference: relative yaw is derived from
  * the actual look vector (not raw yaw), and velocity is expressed in facing-relative
  * (forward / strafe) components. Eye heights cancel in the pitch term, so it uses feet-y deltas.
  */
 public final class NeuralObservation {
-    public static final int OBS_DIM = 13;
+    public static final int OBS_DIM = 18;
 
     private NeuralObservation() {}
 
-    public static float[] observe(BotPlayer bot, LivingEntity target) {
+    public static float[] observe(BotPlayer bot, LivingEntity target, ActionPack pack) {
         Vec3 bp = bot.position();
         Vec3 tp = target.position();
         double dx = tp.x - bp.x;
@@ -55,6 +57,11 @@ public final class NeuralObservation {
                 target.getHealth() / 20.0f,
                 bot.onGround() ? 1.0f : 0.0f,
                 canHit ? 1.0f : 0.0f,
+                pack.isForward() ? 1.0f : 0.0f,
+                pack.isBackward() ? 1.0f : 0.0f,
+                pack.isStrafeLeft() ? 1.0f : 0.0f,
+                pack.isStrafeRight() ? 1.0f : 0.0f,
+                pack.isSprinting() ? 1.0f : 0.0f,
         };
     }
 }

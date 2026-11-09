@@ -42,10 +42,19 @@ public final class NeuralPolicy {
             if (data == null || data.layers == null || data.layers.length == 0) {
                 throw new IllegalStateException("empty or invalid policy json");
             }
+            if (data.obs_dim != NeuralObservation.OBS_DIM) {
+                throw new IllegalStateException("policy expects " + data.obs_dim + " inputs, mod builds "
+                        + NeuralObservation.OBS_DIM + " (export with: python demo_env.py <ckpt> <json>)");
+            }
             return new NeuralPolicy(data);
         } catch (Exception e) {
             throw new RuntimeException("Failed to load neural policy from " + resourcePath + ": " + e.getMessage(), e);
         }
+    }
+
+    /** Number of actions (output size of the last layer). */
+    public int numActions() {
+        return b[b.length - 1].length;
     }
 
     /** Forward pass + arg-max. {@code obs} length must equal the network's input dimension. */
