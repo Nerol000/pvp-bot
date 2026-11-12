@@ -14,6 +14,7 @@ public enum BrainType {
     CHAMPION,
     TD_MAX,
     IMPROVE,
-    /** Kit DQN policy loaded from policy_kit.json (66 obs, 22 actions incl. items/shield/bow). */
+    /** Kit DQN policy loaded from policy_kit.json (66 obs + 5 held keys; sword kit: 8 actions,
+     *  axe kit: 8 + 7 item actions). Exported by demo_kit_env.py. */
     KIT_NEURAL
 }

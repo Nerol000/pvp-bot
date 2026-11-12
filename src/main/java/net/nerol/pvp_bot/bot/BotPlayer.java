@@ -105,6 +105,7 @@ public class BotPlayer extends ServerPlayer {
         }
         this.brain = b;
         actionPack.setInputScale(1.0f);
+        actionPack.setSprintAllowed(true);
         return true;
     }
 

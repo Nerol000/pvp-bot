@@ -56,6 +56,10 @@ public class ActionPack {
     // brain sets 0.2 while an item is in use, which MC does client-side for real players.
     private float inputScale = 1.0f;
 
+    // false = the sprint key stays held but the bot doesn't actually sprint (kit brain: food <= 6
+    // or using an item, which MC enforces client-side for real players). Always true otherwise.
+    private boolean sprintAllowed = true;
+
     private static class LookInterpolation {
         float targetYaw;
         float targetPitch;
@@ -113,12 +117,17 @@ public class ActionPack {
         using = false;
         destroying = false;
         inputScale = 1.0f;
+        sprintAllowed = true;
 
         abortBreaking();
     }
 
     public void setInputScale(float scale) {
         inputScale = scale;
+    }
+
+    public void setSprintAllowed(boolean value) {
+        sprintAllowed = value;
     }
 
     public void jump() {
@@ -503,7 +512,7 @@ public class ActionPack {
         }
 
         bot.setShiftKeyDown(sneaking);
-        bot.setSprinting(sprinting);
+        bot.setSprinting(sprinting && sprintAllowed);
 
         float zza = 0;
         float xxa = 0;

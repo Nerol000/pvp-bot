@@ -7,26 +7,24 @@ import net.nerol.pvp_bot.bot.action.ActionPack;
 import net.nerol.pvp_bot.bot.controller.BotAction;
 
 /**
- * Executes one {@link KitAction} per tick, matching {@code kit_env.KitDuelEnv._apply_action}.
+ * Executes one {@link KitAction} per tick, matching {@code demo_kit_env.DemoKitDuelEnv._apply_action}
+ * (movement keys are sticky toggles, as in {@link ActionPack#executeBotAction}).
  *
  * <p>The fake player gets none of MC's client-side input handling, so this enforces what a real
- * client would: no sprint while using an item or with food <= 6, x0.2 movement while using an item,
- * no attack while using an item, and sprint exhaustion (normally charged from movement packets).
+ * client would: no sprint while using an item or with food <= 6 (the key stays held), x0.2 movement
+ * while using an item, no attack while using an item, and sprint exhaustion (normally charged from
+ * movement packets).
  */
 public final class KitActionExecutor {
 
     private KitActionExecutor() {}
 
-    public static void execute(BotPlayer bot, ActionPack pack, int index) {
-        KitAction a = KitAction.values()[index];
+    public static void execute(BotPlayer bot, ActionPack pack, KitAction a) {
+        int index = a.ordinal();
         boolean using = bot.isUsingItem();
 
         if (index < KitAction.FIRST_KIT) {
             BotAction act = BotAction.values()[index];
-            if (act == BotAction.SPRINT_FORWARD
-                    && (using || bot.getFoodData().getFoodLevel() < KitItems.SPRINT_MIN_FOOD)) {
-                act = BotAction.FORWARD;
-            }
             if (act == BotAction.ATTACK && using) {
                 act = BotAction.IDLE;
             }
@@ -36,8 +34,7 @@ public final class KitActionExecutor {
                 bot.resetAttackStrengthTicker();
             }
         } else {
-            pack.executeBotAction(BotAction.IDLE);   // clears per-tick movement, like the sim
-            switch (a) {
+            switch (a) {                              // held movement keys stay as they are
                 case HOLD_SWORD -> hold(bot, KitItems.SWORD);
                 case HOLD_AXE -> hold(bot, KitItems.AXE);
                 case HOLD_BOW -> hold(bot, KitItems.BOW);
@@ -51,7 +48,9 @@ public final class KitActionExecutor {
                 default -> { }
             }
         }
-        pack.setInputScale(bot.isUsingItem() ? KitItems.USE_ITEM_SPEED_MULT : 1.0f);
+        boolean usingNow = bot.isUsingItem();
+        pack.setInputScale(usingNow ? KitItems.USE_ITEM_SPEED_MULT : 1.0f);
+        pack.setSprintAllowed(!usingNow && bot.getFoodData().getFoodLevel() >= KitItems.SPRINT_MIN_FOOD);
     }
 
     private static void hold(BotPlayer bot, int itemId) {

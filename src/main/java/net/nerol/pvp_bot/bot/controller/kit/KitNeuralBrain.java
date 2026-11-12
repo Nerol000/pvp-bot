@@ -15,21 +15,26 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
 /**
- * Kit DQN brain: {@link KitObservation} (66 floats) -> policy_kit.json MLP -> {@link KitAction} (22).
- * The policy is exported by {@code RL/PythonTrainer/export_kit_policy.py}; its {@code obs_names}
- * must equal {@link KitObservation#NAMES} or the brain refuses to load.
+ * Kit DQN brain: {@link KitObservation} (66 floats) + the 5 held movement keys -> policy_kit.json MLP
+ * -> {@link KitAction}. The policy is exported by {@code RL/PythonTrainer/demo_kit_env.py}; its
+ * {@code obs_names} must equal {@link KitObservation#NAMES} + {@link #KEY_NAMES} or the brain refuses
+ * to load. Its {@code action_names} pick which {@link KitAction}s the outputs mean (the sword kit uses
+ * only IDLE .. JUMP). Without turning actions the aim stays locked on the target, as in training.
  * If kit_obs_fixture.json (from {@code kit_obs_parity.py}) is on the classpath, the encoder is
  * checked against it once and the max difference is logged.
  */
 public final class KitNeuralBrain implements BotBrain {
     public static final String POLICY_RESOURCE = "/assets/pvp_bot/policy_kit.json";
     public static final String FIXTURE_RESOURCE = "/assets/pvp_bot/kit_obs_fixture.json";
+    public static final String[] KEY_NAMES = {"key_fwd", "key_back", "key_left", "key_right", "key_sprint"};
 
-    private static final class Spec { int obs_dim; int actions; String kit; String[] obs_names; }
+    private static final class Spec { int obs_dim; int actions; String kit; String[] obs_names; String[] action_names; }
     private static final class Fixture { String[] obs_names; Case[] cases; }
     private static final class Case { KitObservation.Raw raw; float[] obs; }
 
     private final NeuralPolicy policy;
+    private final KitAction[] actions;        // policy output index -> KitAction
+    private final boolean aimLock;
     private Vec3 prevSelf;
     private Vec3 prevTarget;
     private LivingEntity lastTarget;
@@ -39,13 +44,28 @@ public final class KitNeuralBrain implements BotBrain {
         if (spec == null) {
             throw new IllegalStateException("policy resource not found on classpath: " + POLICY_RESOURCE);
         }
-        if (spec.obs_dim != KitObservation.OBS_DIM || spec.actions != KitAction.values().length
-                || !Arrays.equals(spec.obs_names, KitObservation.NAMES)) {
+        String[] names = Arrays.copyOf(KitObservation.NAMES, KitObservation.OBS_DIM + KEY_NAMES.length);
+        System.arraycopy(KEY_NAMES, 0, names, KitObservation.OBS_DIM, KEY_NAMES.length);
+        if (spec.obs_dim != names.length || !Arrays.equals(spec.obs_names, names)
+                || spec.action_names == null || spec.action_names.length != spec.actions) {
             throw new IllegalStateException("policy_kit.json does not match this mod's kit observation/actions "
-                    + "(obs_dim=" + spec.obs_dim + ", actions=" + spec.actions + ")");
+                    + "(obs_dim=" + spec.obs_dim + ", actions=" + spec.actions
+                    + "); export it with: python demo_kit_env.py <ckpt> <kit> <json>");
         }
-        this.policy = NeuralPolicy.load(POLICY_RESOURCE);
-        System.out.printf("Loaded kit policy (kit=%s)%n", spec.kit);
+        this.actions = new KitAction[spec.actions];
+        boolean turns = false;
+        for (int i = 0; i < spec.actions; i++) {
+            actions[i] = KitAction.valueOf(spec.action_names[i].toUpperCase(java.util.Locale.ROOT));
+            turns |= actions[i].ordinal() >= KitAction.YAW_L.ordinal()
+                    && actions[i].ordinal() <= KitAction.LOOK_AT_TARGET.ordinal();
+        }
+        this.aimLock = !turns;
+        this.policy = NeuralPolicy.load(POLICY_RESOURCE, names.length);
+        if (policy.numActions() != actions.length) {
+            throw new IllegalStateException("policy_kit.json has " + policy.numActions() + " outputs but "
+                    + actions.length + " action_names");
+        }
+        System.out.printf("Loaded kit policy (kit=%s, %d actions)%n", spec.kit, actions.length);
         checkParity();
     }
 
@@ -55,15 +75,24 @@ public final class KitNeuralBrain implements BotBrain {
             prevTarget = null;
             lastTarget = target;
         }
+        if (aimLock) {
+            pack.setLookAtTarget(true);
+        }
         Vec3 self = bot.position();
         Vec3 tgt = target.position();
         if (prevSelf != null) {
             KitActionExecutor.sprintExhaustion(bot, self.x - prevSelf.x, self.z - prevSelf.z);
         }
-        float[] obs = KitObservation.encode(KitObservation.gather(bot, target, prevSelf, prevTarget));
+        float[] base = KitObservation.encode(KitObservation.gather(bot, target, prevSelf, prevTarget));
+        float[] obs = Arrays.copyOf(base, base.length + KEY_NAMES.length);
+        obs[base.length] = pack.isForward() ? 1f : 0f;
+        obs[base.length + 1] = pack.isBackward() ? 1f : 0f;
+        obs[base.length + 2] = pack.isStrafeLeft() ? 1f : 0f;
+        obs[base.length + 3] = pack.isStrafeRight() ? 1f : 0f;
+        obs[base.length + 4] = pack.isSprinting() ? 1f : 0f;
         prevSelf = self;
         prevTarget = tgt;
-        KitActionExecutor.execute(bot, pack, policy.act(obs));
+        KitActionExecutor.execute(bot, pack, actions[policy.act(obs)]);
     }
 
     private static <T> T readJson(String resource, Class<T> type) {

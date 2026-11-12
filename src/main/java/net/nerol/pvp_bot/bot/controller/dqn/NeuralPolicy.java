@@ -33,6 +33,10 @@ public final class NeuralPolicy {
     }
 
     public static NeuralPolicy load(String resourcePath) {
+        return load(resourcePath, NeuralObservation.OBS_DIM);
+    }
+
+    public static NeuralPolicy load(String resourcePath, int expectedObsDim) {
         try (InputStream in = NeuralPolicy.class.getResourceAsStream(resourcePath)) {
             if (in == null) {
                 throw new IllegalStateException("policy resource not found on classpath: " + resourcePath);
@@ -42,9 +46,9 @@ public final class NeuralPolicy {
             if (data == null || data.layers == null || data.layers.length == 0) {
                 throw new IllegalStateException("empty or invalid policy json");
             }
-            if (data.obs_dim != NeuralObservation.OBS_DIM) {
+            if (data.obs_dim != expectedObsDim) {
                 throw new IllegalStateException("policy expects " + data.obs_dim + " inputs, mod builds "
-                        + NeuralObservation.OBS_DIM + " (export with: python demo_env.py <ckpt> <json>)");
+                        + expectedObsDim + " (re-export the policy for this mod version)");
             }
             return new NeuralPolicy(data);
         } catch (Exception e) {
