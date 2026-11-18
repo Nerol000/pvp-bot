@@ -63,6 +63,16 @@ public final class NeuralPolicy {
 
     /** Forward pass + arg-max. {@code obs} length must equal the network's input dimension. */
     public int act(float[] obs) {
+        float[] x = forward(obs);
+        int best = 0;
+        for (int a = 1; a < x.length; a++) {
+            if (x[a] > x[best]) best = a;
+        }
+        return best;
+    }
+
+    /** Forward pass: the raw outputs (Q values) of the last layer. */
+    public float[] forward(float[] obs) {
         float[] x = obs;
         for (int l = 0; l < w.length; l++) {
             boolean last = (l == w.length - 1);
@@ -77,10 +87,6 @@ public final class NeuralPolicy {
             }
             x = y;
         }
-        int best = 0;
-        for (int a = 1; a < x.length; a++) {
-            if (x[a] > x[best]) best = a;
-        }
-        return best;
+        return x;
     }
 }

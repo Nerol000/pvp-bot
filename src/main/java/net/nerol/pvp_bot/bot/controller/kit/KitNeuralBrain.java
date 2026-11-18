@@ -20,6 +20,10 @@ import java.util.Arrays;
  * {@code obs_names} must equal {@link KitObservation#NAMES} + {@link #KEY_NAMES} or the brain refuses
  * to load. Its {@code action_names} pick which {@link KitAction}s the outputs mean (the sword kit uses
  * only IDLE .. JUMP). Without turning actions the aim stays locked on the target, as in training.
+ * A branching policy ({@code branch_sizes} in the json, from {@code train_dqn.py --branching}) has one
+ * output group per control (item / movement / jump / click); every tick the best option of EACH group
+ * is executed, in the json's group order, so the bot can switch item, move, jump and click in one tick.
+ * Option "idle" means "do nothing" in a group.
  * If kit_obs_fixture.json (from {@code kit_obs_parity.py}) is on the classpath, the encoder is
  * checked against it once and the max difference is logged.
  */
@@ -28,12 +32,16 @@ public final class KitNeuralBrain implements BotBrain {
     public static final String FIXTURE_RESOURCE = "/assets/pvp_bot/kit_obs_fixture.json";
     public static final String[] KEY_NAMES = {"key_fwd", "key_back", "key_left", "key_right", "key_sprint"};
 
-    private static final class Spec { int obs_dim; int actions; String kit; String[] obs_names; String[] action_names; }
+    private static final class Spec {
+        int obs_dim; int actions; String kit; String[] obs_names; String[] action_names;
+        String[] branch_names; int[] branch_sizes;
+    }
     private static final class Fixture { String[] obs_names; Case[] cases; }
     private static final class Case { KitObservation.Raw raw; float[] obs; }
 
     private final NeuralPolicy policy;
     private final KitAction[] actions;        // policy output index -> KitAction
+    private final int[] branchSizes;          // null = one action per tick (arg-max over all outputs)
     private final boolean aimLock;
     private Vec3 prevSelf;
     private Vec3 prevTarget;
@@ -60,12 +68,23 @@ public final class KitNeuralBrain implements BotBrain {
                     && actions[i].ordinal() <= KitAction.LOOK_AT_TARGET.ordinal();
         }
         this.aimLock = !turns;
+        if (spec.branch_sizes != null) {
+            if (Arrays.stream(spec.branch_sizes).sum() != spec.actions) {
+                throw new IllegalStateException("policy_kit.json branch_sizes " + Arrays.toString(spec.branch_sizes)
+                        + " do not add up to " + spec.actions + " actions");
+            }
+            this.branchSizes = spec.branch_sizes;
+        } else {
+            this.branchSizes = null;
+        }
         this.policy = NeuralPolicy.load(POLICY_RESOURCE, names.length);
         if (policy.numActions() != actions.length) {
             throw new IllegalStateException("policy_kit.json has " + policy.numActions() + " outputs but "
                     + actions.length + " action_names");
         }
-        System.out.printf("Loaded kit policy (kit=%s, %d actions)%n", spec.kit, actions.length);
+        System.out.printf("Loaded kit policy (kit=%s, %d actions%s)%n", spec.kit, actions.length,
+                branchSizes == null ? "" : ", branches " + Arrays.toString(spec.branch_names)
+                        + " " + Arrays.toString(branchSizes));
         checkParity();
     }
 
@@ -92,7 +111,20 @@ public final class KitNeuralBrain implements BotBrain {
         obs[base.length + 4] = pack.isSprinting() ? 1f : 0f;
         prevSelf = self;
         prevTarget = tgt;
-        KitActionExecutor.execute(bot, pack, actions[policy.act(obs)]);
+        if (branchSizes == null) {
+            KitActionExecutor.execute(bot, pack, actions[policy.act(obs)]);
+            return;
+        }
+        float[] q = policy.forward(obs);
+        int off = 0;
+        for (int n : branchSizes) {               // e.g. item, then movement key, then jump, then click
+            int best = off;
+            for (int i = off + 1; i < off + n; i++) {
+                if (q[i] > q[best]) best = i;
+            }
+            KitActionExecutor.execute(bot, pack, actions[best]);   // IDLE = nothing in this group
+            off += n;
+        }
     }
 
     private static <T> T readJson(String resource, Class<T> type) {
