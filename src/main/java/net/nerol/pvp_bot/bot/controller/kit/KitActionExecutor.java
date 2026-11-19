@@ -45,8 +45,6 @@ public final class KitActionExecutor {
                 }
                 case USE_START -> pack.use(true);
                 case USE_STOP -> pack.use(false);
-                case SWAP_ATTACK_SWORD -> swapAttack(bot, pack, KitItems.SWORD);
-                case SWAP_ATTACK_AXE -> swapAttack(bot, pack, KitItems.AXE);
                 default -> { }
             }
         }
@@ -64,19 +62,6 @@ public final class KitActionExecutor {
             bot.stopUsingItem();                               // MC: slot change stops MAIN-hand use
         }
         inv.setSelectedSlot(slot);
-    }
-
-    /**
-     * Attribute swap: select the item, then swing in the same tick. The brain runs after the
-     * player's tick, and MC applies the new item's attributes (damage, attack speed) and resets the
-     * charge only on the next tick, so this hit uses the old item's damage and charge but the new
-     * item's ability (an axe disables a raised shield).
-     */
-    private static void swapAttack(BotPlayer bot, ActionPack pack, int itemId) {
-        hold(bot, itemId);
-        if (bot.isUsingItem()) return;                         // shield still raised: no attack
-        pack.executeBotAction(BotAction.ATTACK);
-        bot.resetAttackStrengthTicker();
     }
 
     /** Charge on-ground sprint exhaustion for the distance moved last tick (0.1 per block). */
