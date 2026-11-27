@@ -13,6 +13,7 @@ import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.decoration.ItemFrame;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.*;
 import net.nerol.pvp_bot.bot.BotPlayer;
@@ -51,6 +52,12 @@ public class ActionPack {
     // tick (mirrors environment.py Bot.aim_lock). Latched by LOOK_AT_TARGET, released when the
     // policy takes manual rotation control (YAW_*/PITCH_*).
     private boolean aimLock = false;
+
+    // Bow/crossbow aim lead (opt-in, kit brain only; false = plain lookAt for every other brain).
+    private boolean leadAim = false;
+    // Target and its position at the last apply(), for the bow/crossbow aim lead.
+    private Entity leadTarget;
+    private Vec3 leadTargetPos;
 
     // Movement input multiplier applied in apply(). 1.0 = unchanged (all legacy brains); the kit
     // brain sets 0.2 while an item is in use, which MC does client-side for real players.
@@ -118,6 +125,7 @@ public class ActionPack {
         destroying = false;
         inputScale = 1.0f;
         sprintAllowed = true;
+        leadAim = false;
 
         abortBreaking();
     }
@@ -128,6 +136,11 @@ public class ActionPack {
 
     public void setSprintAllowed(boolean value) {
         sprintAllowed = value;
+    }
+
+    /** Kit brain only: lead the target with a bow/crossbow in hand while aim-locked. */
+    public void setLeadAim(boolean value) {
+        leadAim = value;
     }
 
     public void jump() {
@@ -387,6 +400,44 @@ public class ActionPack {
         bot.yBodyRot = yaw;
     }
 
+    /**
+     * Aim-lock with a bow/crossbow: lead the target by its last-tick movement x the arrow's
+     * flight time and aim above its middle for gravity. Same math as demo_kit_env._snap_aim
+     * (arrow speed 3.0 bow / 3.15 crossbow, drag 0.99, gravity 0.05 per tick, spawned at eye - 0.1).
+     */
+    public void lookAtLeading(Entity target, boolean crossbow) {
+        double speed = crossbow ? 3.15 : 3.0;
+        double sx = bot.getX(), sz = bot.getZ(), sy = bot.getEyeY() - 0.1;
+        Vec3 move = (target == leadTarget && leadTargetPos != null)
+                ? target.position().subtract(leadTargetPos) : Vec3.ZERO;
+        double tx = target.getX(), tz = target.getZ(), t = 0.0;
+        for (int i = 0; i < 3; i++) {
+            t = arrowFlightTicks(Math.hypot(tx - sx, tz - sz), speed);
+            tx = target.getX() + move.x * t;
+            tz = target.getZ() + move.z * t;
+        }
+        double dx = tx - sx, dz = tz - sz;
+        double dy = target.getY() + target.getBbHeight() / 2.0 + 0.05 * t * (t + 1.0) / 2.0 - sy;
+        float yaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0);
+        float pitch = (float) (-Math.toDegrees(Math.atan2(dy, Math.max(Math.hypot(dx, dz), 1e-6))));
+        bot.setYRot(yaw);
+        bot.setXRot(pitch);
+        bot.yHeadRot = yaw;
+        bot.yBodyRot = yaw;
+    }
+
+    private static double arrowFlightTicks(double dist, double speed) {
+        double x = dist * (1.0 - 0.99) / speed;
+        return x < 0.9 ? Math.log(1.0 - x) / Math.log(0.99) : dist / speed * 2.0;
+    }
+
+    /** Remembers the target's position each tick so lookAtLeading knows how it is moving. */
+    private void trackTarget() {
+        Entity target = bot.getTarget();
+        leadTarget = target;
+        leadTargetPos = target != null ? target.position() : null;
+    }
+
     /** Rotates the bot's look direction by a relative delta. */
     public void turn(float deltaYaw, float deltaPitch) {
         look(bot.getYRot() + deltaYaw, bot.getXRot() + deltaPitch);
@@ -482,6 +533,7 @@ public class ActionPack {
     public boolean isStrafeLeft()  { return strafeLeft; }
     public boolean isStrafeRight() { return strafeRight; }
     public boolean isSprinting()   { return sprinting; }
+    public boolean isUsing()       { return using; }
 
     /**
      * Pushes current sticky state into the bot's movement inputs.
@@ -493,9 +545,15 @@ public class ActionPack {
         if (aimLock) {
             Entity target = bot.getTarget();
             if (target != null) {
-                lookAt(target);
+                ItemStack main = bot.getMainHandItem();
+                if (leadAim && (main.is(Items.BOW) || main.is(Items.CROSSBOW))) {
+                    lookAtLeading(target, main.is(Items.CROSSBOW));
+                } else {
+                    lookAt(target);
+                }
             }
         }
+        if (leadAim) trackTarget();
 
         if (lookInterpolation != null && lookInterpolation.ticksRemaining > 0) {
             bot.setYRot(bot.getYRot() + lookInterpolation.deltaYaw);

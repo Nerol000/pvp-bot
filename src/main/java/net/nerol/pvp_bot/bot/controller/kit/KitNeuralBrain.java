@@ -42,6 +42,9 @@ public final class KitNeuralBrain implements BotBrain {
     private final NeuralPolicy policy;
     private final KitAction[] actions;        // policy output index -> KitAction
     private final int[] branchSizes;          // null = one action per tick (arg-max over all outputs)
+    private final int itemBranch;             // index of the "item" / "click" branches, -1 if absent
+    private final int clickBranch;
+    private final KitRangedScript ranged;     // null = no scripted ranged layer (non-branching or no bow)
     private final boolean aimLock;
     private Vec3 prevSelf;
     private Vec3 prevTarget;
@@ -77,6 +80,13 @@ public final class KitNeuralBrain implements BotBrain {
         } else {
             this.branchSizes = null;
         }
+        java.util.List<String> bn = spec.branch_names == null || branchSizes == null
+                ? java.util.List.of() : Arrays.asList(spec.branch_names);
+        this.itemBranch = bn.indexOf("item");
+        this.clickBranch = bn.indexOf("click");
+        java.util.List<KitAction> acts = Arrays.asList(actions);
+        boolean canShoot = acts.contains(KitAction.HOLD_BOW) || acts.contains(KitAction.HOLD_CROSSBOW);
+        this.ranged = itemBranch >= 0 && clickBranch >= 0 && canShoot ? new KitRangedScript() : null;
         this.policy = NeuralPolicy.load(POLICY_RESOURCE, names.length);
         if (policy.numActions() != actions.length) {
             throw new IllegalStateException("policy_kit.json has " + policy.numActions() + " outputs but "
@@ -85,6 +95,8 @@ public final class KitNeuralBrain implements BotBrain {
         System.out.printf("Loaded kit policy (kit=%s, %d actions%s)%n", spec.kit, actions.length,
                 branchSizes == null ? "" : ", branches " + Arrays.toString(spec.branch_names)
                         + " " + Arrays.toString(branchSizes));
+        if (ranged != null) System.out.println("Kit scripted ranged layer on (far >= "
+                + KitRangedScript.FAR + ", near < " + KitRangedScript.NEAR + ")");
         checkParity();
     }
 
@@ -97,12 +109,14 @@ public final class KitNeuralBrain implements BotBrain {
         if (aimLock) {
             pack.setLookAtTarget(true);
         }
+        pack.setLeadAim(ranged != null);
         Vec3 self = bot.position();
         Vec3 tgt = target.position();
         if (prevSelf != null) {
             KitActionExecutor.sprintExhaustion(bot, self.x - prevSelf.x, self.z - prevSelf.z);
         }
-        float[] base = KitObservation.encode(KitObservation.gather(bot, target, prevSelf, prevTarget));
+        KitObservation.Raw raw = KitObservation.gather(bot, target, prevSelf, prevTarget);
+        float[] base = KitObservation.encode(raw);
         float[] obs = Arrays.copyOf(base, base.length + KEY_NAMES.length);
         obs[base.length] = pack.isForward() ? 1f : 0f;
         obs[base.length + 1] = pack.isBackward() ? 1f : 0f;
@@ -116,13 +130,20 @@ public final class KitNeuralBrain implements BotBrain {
             return;
         }
         float[] q = policy.forward(obs);
+        KitAction[] script = ranged != null ? ranged.decide(bot, pack, raw) : null;
         int off = 0;
-        for (int n : branchSizes) {               // e.g. item, then movement key, then jump, then click
+        for (int b = 0; b < branchSizes.length; b++) {   // e.g. item, then movement key, then jump, then click
+            int n = branchSizes[b];
             int best = off;
             for (int i = off + 1; i < off + n; i++) {
                 if (q[i] > q[best]) best = i;
             }
-            KitActionExecutor.execute(bot, pack, actions[best]);   // IDLE = nothing in this group
+            KitAction a = actions[best];
+            if (script != null) {                 // ranged layer overrides item + click; policy keeps move/jump
+                if (b == itemBranch && script[0] != null) a = script[0];
+                else if (b == clickBranch && script[1] != null) a = script[1];
+            }
+            KitActionExecutor.execute(bot, pack, a);   // IDLE = nothing in this group
             off += n;
         }
     }
